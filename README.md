@@ -59,7 +59,7 @@ PORT=5000
 MONGO_URI=mongodb+srv://USERNAME:PASSWORD@HOST/DATABASE
 JWT_SECRET=replace-with-long-random-secret
 JWT_EXPIRES_IN=7d
-CORS_ORIGIN=http://localhost:5173
+CORS_ORIGIN=http://localhost:5173,https://mspixelpulse.com,https://www.mspixelpulse.com
 COOKIE_SECURE=false
 ```
 
@@ -193,7 +193,7 @@ NODE_ENV=production
 MONGO_URI
 JWT_SECRET
 JWT_EXPIRES_IN=7d
-CORS_ORIGIN=https://mspixelpulse.vercel.app
+CORS_ORIGIN=https://mspixelpulse.com,https://www.mspixelpulse.com,https://mspixelpulse.vercel.app
 COOKIE_SECURE=true
 SUPABASE_URL
 SUPABASE_SERVICE_ROLE_KEY
@@ -210,7 +210,7 @@ Do not overwrite real dashboard secrets with placeholder values.
 - Login fails with network errors: check Render service health and `/health`.
 - Health says MongoDB disconnected: check Atlas URI, Atlas network access, and database user.
 - Uploads return `503`: check Supabase URL, server secret key, and `SUPABASE_BUCKET=uploads`.
-- CORS errors: confirm `CORS_ORIGIN` includes the exact Vercel frontend origin.
+- CORS errors: confirm `CORS_ORIGIN` includes the exact frontend origin. The canonical public origin is `https://mspixelpulse.com`.
 - Invalid credentials: seed the expected admin/demo users or confirm the account is active.
 
 ## Security Notes

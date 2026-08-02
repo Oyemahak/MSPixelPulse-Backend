@@ -4,6 +4,11 @@ const allowed = (process.env.CORS_ORIGIN || '')
   .map(s => s.trim())
   .filter(Boolean);
 
+const publicSiteOrigins = new Set([
+  'https://mspixelpulse.com',
+  'https://www.mspixelpulse.com',
+]);
+
 function originMatches(origin, allowedOrigin) {
   if (allowedOrigin === origin) return true;
   if (allowedOrigin.includes('*')) {
@@ -23,9 +28,9 @@ export const corsOptions = {
       const host = u.hostname;
 
       if (allowed.some((entry) => originMatches(origin, entry))) return cb(null, true);
+      if (publicSiteOrigins.has(origin)) return cb(null, true);
       if (host === 'localhost' || host === '127.0.0.1') return cb(null, true);
       if (host.endsWith('.vercel.app')) return cb(null, true);
-      if (host.endsWith('mspixelplus.com')) return cb(null, true);
     } catch (err) {
       console.error('CORS check failed');
     }

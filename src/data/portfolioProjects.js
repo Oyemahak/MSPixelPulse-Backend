@@ -1,4 +1,4 @@
-const cover = (filename) => `https://mspixelpulse.vercel.app/projects/${filename}`;
+const cover = (filename) => `https://mspixelpulse.com/projects/${filename}`;
 const mockup = (filename) => cover(`mockups/${filename}`);
 
 export const portfolioProjects = [
