@@ -11,6 +11,7 @@
   "scripts": {
     "dev": "node --env-file=.env src/server.js",
     "start": "node src/server.js",
+    "test": "node --test",
     "seed:admin": "node src/scripts/seedAdmin.js",
     "seed:demo": "node src/scripts/seedDemo.js",
     "seed:super-admin": "node src/scripts/seedSuperAdmin.js",

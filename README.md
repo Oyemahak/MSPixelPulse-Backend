@@ -71,6 +71,19 @@ SUPABASE_SERVICE_ROLE_KEY=replace-with-server-secret
 SUPABASE_BUCKET=uploads
 ```
 
+Required for contact and blog notification email:
+
+```text
+SMTP_USER=
+SMTP_PASS=
+SMTP_FROM="MSPixelPulse <info@mspixelpulse.com>"
+PUBLIC_SITE_URL=https://mspixelpulse.com
+ANONYMOUS_ID_SALT=replace-with-long-random-secret
+NOTIFICATION_RECIPIENTS=info@mspixelpulse.com,mspixelpulse@gmail.com
+```
+
+`info@mspixelpulse.com` remains the public business and sender-facing address. Internal contact and blog notifications are delivered to both `info@mspixelpulse.com` and `mspixelpulse@gmail.com`; recipient lists are de-duplicated. Use the per-event flags in `.env.example` to pause a notification category without disabling the underlying database action.
+
 Production super-admin seed:
 
 ```text
@@ -126,6 +139,15 @@ Demo-safe accounts should be created with environment-provided passwords only. D
 - `POST /api/files/upload`
 - `PUT /api/projects/:projectId/requirements`
 - `POST /api/users/me/avatar`
+- `POST /api/contact`
+- `GET /api/blog-engagement/:slug`
+- `PUT|DELETE /api/blog-engagement/:slug/reaction`
+- `POST /api/blog-engagement/:slug/comments`
+- `POST /api/blog-engagement/:slug/shares`
+- `POST /api/blog-engagement/subscriptions`
+- `GET /api/blog-engagement/subscriptions/confirm`
+- `GET /api/blog-engagement/subscriptions/unsubscribe`
+- `GET /api/admin/blog-engagement/*` (admin only)
 
 ## Health Endpoints
 

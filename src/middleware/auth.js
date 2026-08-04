@@ -29,6 +29,21 @@ export async function requireAuth(req, res, next) {
   }
 }
 
+export async function optionalAuth(req, _res, next) {
+  try {
+    const token = getToken(req);
+    if (!token) return next();
+    const payload = jwt.verify(token, jwtSecret());
+    const userId = payload.id || payload.sub;
+    if (!userId) return next();
+    const user = await User.findById(userId).select("-password");
+    if (user) req.user = user;
+  } catch {
+    // Public engagement remains available when an optional token is absent or stale.
+  }
+  return next();
+}
+
 export function requireRole(roles) {
   const allow = Array.isArray(roles) ? roles : [roles];
   return (req, res, next) => {

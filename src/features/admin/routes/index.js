@@ -5,6 +5,7 @@ import {
   listUsers, listPending, getUser, updateUser, deleteUser,
   approveUser, rejectUser, updateRole, createUser
 } from '../controllers/admin.controller.js';
+import blogEngagementAdminRoutes from '../../blogEngagement/routes/admin.js';
 
 const router = Router();
 router.use(requireAuth, requireRole('admin'));
@@ -21,5 +22,7 @@ router.patch('/users/:userId/approve', approveUser);
 router.patch('/users/:userId/reject', rejectUser);   // <— add this
 
 router.patch('/users/:userId/role', updateRole);
+
+router.use('/blog-engagement', blogEngagementAdminRoutes);
 
 export default router;
