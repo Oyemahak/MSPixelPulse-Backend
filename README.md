@@ -74,13 +74,14 @@ SUPABASE_BUCKET=uploads
 Required for contact and blog notification email:
 
 ```text
-SMTP_USER=
-SMTP_PASS=
-SMTP_FROM="MSPixelPulse <info@mspixelpulse.com>"
+RESEND_API_KEY=
+RESEND_FROM_EMAIL="MSPixelPulse <info@mspixelpulse.com>"
 PUBLIC_SITE_URL=https://mspixelpulse.com
 ANONYMOUS_ID_SALT=replace-with-long-random-secret
 NOTIFICATION_RECIPIENTS=info@mspixelpulse.com,mspixelpulse@gmail.com
 ```
+
+The backend sends through Resend over HTTPS, avoiding outbound SMTP connection delays and app-password handling. The sending domain must be verified with the provider.
 
 `info@mspixelpulse.com` remains the public business and sender-facing address. Internal contact and blog notifications are delivered to both `info@mspixelpulse.com` and `mspixelpulse@gmail.com`; recipient lists are de-duplicated. Use the per-event flags in `.env.example` to pause a notification category without disabling the underlying database action.
 

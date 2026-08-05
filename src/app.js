@@ -12,6 +12,11 @@ import { healthPayload } from './lib/health.js';
 
 const app = express();
 
+// Render terminates TLS one proxy hop before the Node service. Trust exactly
+// that hop so express-rate-limit can safely resolve the visitor IP from
+// X-Forwarded-For without accepting an arbitrary forwarded chain.
+app.set('trust proxy', 1);
+
 // ───────────────────────────────────────────────
 // CORS first (reads from corsOptions in config/cors.js)
 // ───────────────────────────────────────────────

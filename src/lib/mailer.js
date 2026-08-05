@@ -1,10 +1,10 @@
-import nodemailer from "nodemailer";
 import { escapeHtml } from "./validation.js";
 
 export const PUBLIC_BUSINESS_EMAIL = "info@mspixelpulse.com";
 export const SECONDARY_NOTIFICATION_EMAIL = "mspixelpulse@gmail.com";
 
-let transporter;
+const RESEND_API_URL = "https://api.resend.com/emails";
+const EMAIL_TIMEOUT_MS = 15000;
 
 function splitAddresses(value) {
   return String(value || "")
@@ -23,41 +23,73 @@ export function notificationRecipients() {
   ]));
 }
 
-function getTransporter() {
-  if (transporter) return transporter;
+function senderAddress() {
+  return String(
+    process.env.MAIL_FROM ||
+    process.env.RESEND_FROM_EMAIL ||
+    process.env.SMTP_FROM ||
+    `MSPixelPulse <${PUBLIC_BUSINESS_EMAIL}>`,
+  ).trim();
+}
 
-  const user = String(process.env.SMTP_USER || "").trim();
-  const pass = String(process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD || "").trim();
-  if (!user || !pass) {
-    const error = new Error("SMTP is not configured");
-    error.code = "SMTP_NOT_CONFIGURED";
+export function mailerStatus() {
+  const resendConfigured = Boolean(String(process.env.RESEND_API_KEY || "").trim());
+  return {
+    configured: resendConfigured,
+    provider: resendConfigured ? "resend" : "unconfigured",
+  };
+}
+
+async function sendWithResend({ to, subject, html, text, replyTo }) {
+  const apiKey = String(process.env.RESEND_API_KEY || "").trim();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), EMAIL_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(RESEND_API_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: senderAddress(),
+        to: Array.isArray(to) ? to : [to],
+        subject,
+        html,
+        text,
+        ...(replyTo ? { reply_to: replyTo } : {}),
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const error = new Error("Email provider rejected the request");
+      error.code = "RESEND_REJECTED";
+      error.status = response.status;
+      throw error;
+    }
+
+    return response.json().catch(() => ({ provider: "resend" }));
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      const timeoutError = new Error("Email provider timed out");
+      timeoutError.code = "EMAIL_SEND_TIMEOUT";
+      throw timeoutError;
+    }
     throw error;
+  } finally {
+    clearTimeout(timeout);
   }
-
-  const host = String(process.env.SMTP_HOST || "").trim();
-  transporter = nodemailer.createTransport(host ? {
-    host,
-    port: Number(process.env.SMTP_PORT || 587),
-    secure: String(process.env.SMTP_SECURE || "").toLowerCase() === "true",
-    auth: { user, pass },
-  } : {
-    service: "gmail",
-    auth: { user, pass },
-  });
-
-  return transporter;
 }
 
 export async function sendMail({ to, subject, html, text, replyTo }) {
-  const from = String(process.env.SMTP_FROM || `MSPixelPulse <${PUBLIC_BUSINESS_EMAIL}>`).trim();
-  return getTransporter().sendMail({
-    from,
-    to: Array.isArray(to) ? to.join(", ") : to,
-    subject,
-    html,
-    text,
-    ...(replyTo ? { replyTo } : {}),
-  });
+  if (!String(process.env.RESEND_API_KEY || "").trim()) {
+    const error = new Error("Email delivery is not configured");
+    error.code = "RESEND_NOT_CONFIGURED";
+    throw error;
+  }
+  return sendWithResend({ to, subject, html, text, replyTo });
 }
 
 function renderRows(rows) {

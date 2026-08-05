@@ -133,16 +133,21 @@ export async function setReaction(req, res) {
     const counts = await countsFor(article.blogSlug);
     const recordedAt = new Date().toISOString();
     const details = { ...article, action, ...counts, recordedAt };
-    safeAsync("reaction notification failed", deliverNotification({
+    const notificationLog = await deliverNotification({
       type: reactionType === "like" ? "blog_like" : "blog_dislike",
       relatedEntityType: "BlogReaction",
       relatedEntityId: reaction._id,
       message: reactionNotificationEmail(details),
       dedupeKey: `reaction:${reaction._id}:${reaction.updatedAt.getTime()}`,
       metadata: details,
-    }));
+    });
 
-    return res.json({ ok: true, reaction: reactionType, counts });
+    return res.json({
+      ok: true,
+      reaction: reactionType,
+      counts,
+      emailDeliveryStatus: notificationLog.status,
+    });
   } catch (error) {
     if (error?.code === 11000) return res.status(409).json({ error: "That reaction was already recorded." });
     return res.status(error.status || 500).json({ error: error.status ? error.message : "Unable to save the reaction." });
@@ -217,7 +222,11 @@ export async function submitComment(req, res) {
     comment.emailDeliveryStatus = log.status;
     await comment.save();
 
-    return res.status(201).json({ ok: true, status: "pending" });
+    return res.status(201).json({
+      ok: true,
+      status: "pending",
+      emailDeliveryStatus: comment.emailDeliveryStatus,
+    });
   } catch (error) {
     return res.status(error.status || 500).json({ error: error.status ? error.message : "Unable to submit the comment." });
   }
@@ -305,6 +314,7 @@ export async function startSubscription(req, res) {
     return res.status(201).json({
       ok: true,
       status: "pending",
+      notificationEmailStatus: notificationLog.status,
       confirmationEmailStatus: confirmationLog.status,
     });
   } catch (error) {

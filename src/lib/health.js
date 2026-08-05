@@ -1,8 +1,10 @@
 import { mongoState } from "../config/db.js";
+import { mailerStatus } from "./mailer.js";
 import { storageStatus } from "./supabase.js";
 
 export function healthPayload() {
   const storage = storageStatus();
+  const email = mailerStatus();
   return {
     success: true,
     service: "mspixelpulse-api",
@@ -19,5 +21,6 @@ export function healthPayload() {
     storage: {
       bucketConfigured: storage.storageBucketConfigured,
     },
+    email,
   };
 }
