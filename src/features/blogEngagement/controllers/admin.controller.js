@@ -16,6 +16,13 @@ import {
   subscriptionNotificationEmail,
 } from "../../../lib/emailTemplates.js";
 import { retryLeadNotification } from "../../leads/controllers/lead.controller.js";
+import {
+  commentFilters,
+  createdAtSort,
+  leadFilters,
+  notificationFilters,
+  subscriberFilters,
+} from "../adminFilters.js";
 
 const COMMENT_STATUSES = new Set(["pending", "approved", "rejected", "spam"]);
 const LEAD_STATUSES = new Set(["new", "contacted", "qualified", "completed", "spam"]);
@@ -24,10 +31,6 @@ function pageOptions(query) {
   const page = Math.max(1, Math.min(1000, Number(query.page) || 1));
   const limit = Math.max(1, Math.min(100, Number(query.limit) || 25));
   return { page, limit, skip: (page - 1) * limit };
-}
-
-function regex(value) {
-  return new RegExp(cleanText(value, 120).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
 }
 
 function cleanCommentText(value) {
@@ -114,15 +117,9 @@ export async function getSummary(_req, res) {
 export async function listComments(req, res) {
   try {
     const { page, limit, skip } = pageOptions(req.query);
-    const condition = {};
-    if (COMMENT_STATUSES.has(req.query.status)) condition.status = req.query.status;
-    if (req.query.blogSlug) condition.blogSlug = cleanText(req.query.blogSlug, 180);
-    if (req.query.q) {
-      const query = regex(req.query.q);
-      condition.$or = [{ name: query }, { email: query }, { comment: query }, { blogTitle: query }];
-    }
+    const condition = commentFilters(req.query, COMMENT_STATUSES);
     const [comments, total] = await Promise.all([
-      BlogComment.find(condition).select("+email").sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+      BlogComment.find(condition).select("+email").sort(createdAtSort(req.query)).skip(skip).limit(limit).lean(),
       BlogComment.countDocuments(condition),
     ]);
     return res.json({ comments, pagination: { page, limit, total, hasMore: page * limit < total } });
@@ -169,11 +166,9 @@ export async function deleteComment(req, res) {
 export async function listSubscribers(req, res) {
   try {
     const { page, limit, skip } = pageOptions(req.query);
-    const condition = {};
-    if (["pending", "active", "unsubscribed"].includes(req.query.status)) condition.status = req.query.status;
-    if (req.query.q) condition.email = regex(req.query.q);
+    const condition = subscriberFilters(req.query);
     const [subscribers, total] = await Promise.all([
-      BlogSubscriber.find(condition).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+      BlogSubscriber.find(condition).sort(createdAtSort(req.query)).skip(skip).limit(limit).lean(),
       BlogSubscriber.countDocuments(condition),
     ]);
     return res.json({ subscribers, pagination: { page, limit, total, hasMore: page * limit < total } });
@@ -225,15 +220,9 @@ export async function exportSubscribers(_req, res) {
 export async function listLeads(req, res) {
   try {
     const { page, limit, skip } = pageOptions(req.query);
-    const condition = {};
-    if (LEAD_STATUSES.has(req.query.status)) condition.status = req.query.status;
-    if (req.query.source) condition.source = cleanText(req.query.source, 120);
-    if (req.query.q) {
-      const query = regex(req.query.q);
-      condition.$or = [{ name: query }, { email: query }, { businessName: query }, { message: query }];
-    }
+    const condition = leadFilters(req.query, LEAD_STATUSES);
     const [leads, total] = await Promise.all([
-      Lead.find(condition).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+      Lead.find(condition).sort(createdAtSort(req.query)).skip(skip).limit(limit).lean(),
       Lead.countDocuments(condition),
     ]);
     return res.json({ leads, pagination: { page, limit, total, hasMore: page * limit < total } });
@@ -260,11 +249,9 @@ export async function updateLead(req, res) {
 export async function listNotifications(req, res) {
   try {
     const { page, limit, skip } = pageOptions(req.query);
-    const condition = {};
-    if (["pending", "sent", "failed", "skipped"].includes(req.query.status)) condition.status = req.query.status;
-    if (req.query.type) condition.notificationType = cleanText(req.query.type, 120);
+    const condition = notificationFilters(req.query);
     const [notifications, total] = await Promise.all([
-      NotificationLog.find(condition).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+      NotificationLog.find(condition).sort(createdAtSort(req.query)).skip(skip).limit(limit).lean(),
       NotificationLog.countDocuments(condition),
     ]);
     return res.json({ notifications, pagination: { page, limit, total, hasMore: page * limit < total } });

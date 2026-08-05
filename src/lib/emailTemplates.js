@@ -23,7 +23,7 @@ export function contactNotificationEmail(lead) {
         { label: "Message", value: lead.message },
         { label: "Submitted", value: lead.createdAt?.toISOString?.() || new Date().toISOString() },
       ],
-      button: { label: "Review saved lead", url: `${siteUrl}/admin/blog-engagement?tab=leads&lead=${lead._id}` },
+      button: { label: "Review contact inquiry", url: `${siteUrl}/admin/blog-engagement?tab=leads&lead=${lead._id}` },
     }),
   };
 }
