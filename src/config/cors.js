@@ -30,7 +30,6 @@ export const corsOptions = {
       if (allowed.some((entry) => originMatches(origin, entry))) return cb(null, true);
       if (publicSiteOrigins.has(origin)) return cb(null, true);
       if (host === 'localhost' || host === '127.0.0.1') return cb(null, true);
-      if (host.endsWith('.vercel.app')) return cb(null, true);
     } catch (err) {
       console.error('CORS check failed');
     }

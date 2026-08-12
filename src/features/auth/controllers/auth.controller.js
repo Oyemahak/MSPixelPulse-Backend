@@ -3,6 +3,8 @@ import jwt from 'jsonwebtoken';
 import User from '../../../models/User.js';
 import { jwtSecret, signToken } from '../../../utils/jwt.js';
 import { boolEnv, isProduction } from '../../../config/env.js';
+import { cleanPublicUrl, cleanText, isValidEmail, normalizeEmail } from '../../../lib/validation.js';
+import { presentUser } from '../../../lib/presentUser.js';
 
 const COOKIE_NAME = 'token';
 const COOKIE_OPTS = {
@@ -22,19 +24,51 @@ function getToken(req) {
 
 // POST /api/auth/register
 export async function register(req, res) {
-  const { name = '', email = '', password = '', role = 'client' } = req.body || {};
-  const normalizedEmail = String(email || '').trim().toLowerCase();
-  if (!normalizedEmail || !password) return res.status(400).json({ message: 'Email and password are required' });
+  const {
+    name = '',
+    email = '',
+    password = '',
+    phone = '',
+    businessName = '',
+    businessWebsite = '',
+    industry = '',
+    projectContactPreference = '',
+  } = req.body || {};
+  const normalizedEmail = normalizeEmail(email);
+  const safeName = cleanText(name, 120);
+  if (!safeName || !isValidEmail(normalizedEmail)) {
+    return res.status(400).json({ message: 'A valid name and email are required' });
+  }
+  if (typeof password !== 'string' || password.length < 8 || password.length > 72) {
+    return res.status(400).json({ message: 'Password must be between 8 and 72 characters' });
+  }
+  const website = businessWebsite ? cleanPublicUrl(businessWebsite) : '';
+  if (businessWebsite && !website) {
+    return res.status(400).json({ message: 'Business website must be a valid http or https URL' });
+  }
 
   const exists = await User.findOne({ email: normalizedEmail });
   if (exists) return res.status(409).json({ message: 'Email already in use' });
 
   const u = await User.create({
-    name: name.trim(),
+    name: safeName,
     email: normalizedEmail,
     password,
-    role,               // client/developer/admin
-    status: 'pending',  // <-- requests must be approved by Admin
+    // Public registration is always an applicant request for client access.
+    // Privileged roles are created or assigned only by an existing Admin.
+    role: 'client',
+    status: 'pending',
+    accountStatus: 'pending',
+    phone: cleanText(phone, 40),
+    businessName: cleanText(businessName, 160),
+    businessWebsite: website,
+    industry: cleanText(industry, 120),
+    projectContactPreference: cleanText(projectContactPreference, 2000),
+    accessApplication: {
+      status: 'pending',
+      requestedRole: 'client',
+      submittedAt: new Date(),
+    },
   });
 
   const user = await User.findById(u._id).select('-password');
@@ -63,7 +97,7 @@ export async function login(req, res) {
     const token = signToken(user);
     res.cookie(COOKIE_NAME, token, COOKIE_OPTS);
 
-    const safe = await User.findById(user._id).select('-password');
+    const safe = await presentUser(await User.findById(user._id).select('-password'));
     return res.json({ token, user: safe });
   } catch (err) {
     console.error('Login error:', err.code || 'LOGIN_FAILURE');
@@ -84,8 +118,10 @@ export async function me(req, res) {
     if (!token) return res.status(401).json({ message: 'Unauthorized' });
     const payload = jwt.verify(token, jwtSecret());
     const user = await User.findById(payload.id).select('-password');
-    if (!user) return res.status(401).json({ message: 'Unauthorized' });
-    res.json({ user });
+    if (!user || user.status !== 'active' || user.accountStatus === 'suspended') {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+    res.json({ user: await presentUser(user) });
   } catch {
     res.status(401).json({ message: 'Unauthorized' });
   }

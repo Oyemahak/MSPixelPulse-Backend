@@ -4,6 +4,10 @@ import Project from '../models/Project.js';
 import { portfolioProjects } from '../data/portfolioProjects.js';
 
 const FORCE = process.env.PORTFOLIO_FORCE === 'true';
+const EXCLUDED_REPOSITORIES = new Set([
+  'mspixelpulseagency/mahak-job-agent',
+  'mspixelpulseagency/applypulse-ai',
+]);
 
 const mutableFields = [
   'slug',
@@ -17,6 +21,12 @@ const mutableFields = [
   'platform',
   'technologies',
   'repositoryUrl',
+  'repositoryFullName',
+  'repositoryId',
+  'repositoryUpdatedAt',
+  'sourceImportedAt',
+  'coverSource',
+  'categories',
   'liveUrl',
   'thumbnail',
   'mockupImages',
@@ -56,7 +66,12 @@ function validate(project) {
   for (const key of ['liveUrl', 'repositoryUrl', 'thumbnail']) {
     if (!isUrl(project[key])) errors.push(`invalid ${key}`);
   }
-  if (project.published && !project.liveUrl) errors.push('published project requires liveUrl');
+  if (project.published && !project.liveUrl && !project.repositoryUrl) {
+    errors.push('published project requires a live or repository URL');
+  }
+  if (project.repositoryFullName && EXCLUDED_REPOSITORIES.has(project.repositoryFullName.toLowerCase())) {
+    errors.push('repository is excluded by policy');
+  }
   return errors;
 }
 
@@ -71,13 +86,13 @@ function buildPatch(existing, project) {
       current === null ||
       current === '' ||
       (Array.isArray(current) && current.length === 0);
+    const incomingHasValue =
+      incoming !== undefined &&
+      incoming !== null &&
+      incoming !== '' &&
+      (!Array.isArray(incoming) || incoming.length > 0);
 
-    if (
-      key === 'slug' ||
-      FORCE ||
-      emptyCurrent ||
-      ['published', 'featured', 'displayOrder', 'status'].includes(key)
-    ) {
+    if (FORCE || (emptyCurrent && incomingHasValue) || (key === 'slug' && current !== incoming)) {
       patch[key] = incoming;
     }
   }
@@ -86,6 +101,7 @@ function buildPatch(existing, project) {
 
 async function run() {
   await connectDB();
+  await Project.createIndexes();
 
   const report = {
     imported: 0,
@@ -106,6 +122,7 @@ async function run() {
     try {
       const existing = await Project.findOne({
         $or: [
+          ...(project.repositoryFullName ? [{ repositoryFullName: project.repositoryFullName.toLowerCase() }] : []),
           { slug: project.slug },
           { title: project.title },
         ],

@@ -3,6 +3,7 @@ import { requireAuth, requireRole } from "../middleware/auth.js";
 import Room from "../models/Room.js";
 import Project from "../models/Project.js";
 import Message from "../models/Message.js";
+import { boundedMessageLimit, normalizeMessageBody } from "../lib/messagePolicy.js";
 
 const router = express.Router();
 
@@ -39,7 +40,14 @@ router.get(
 
     const rows = await Message.find(q)
       .sort({ sentAt: -1 })
-      .limit(Number(limit));
+      .limit(boundedMessageLimit(limit));
+
+    if (rows.length) {
+      await Message.updateMany(
+        { _id: { $in: rows.map((message) => message._id) }, author: { $ne: req.user._id } },
+        { $addToSet: { readBy: req.user._id } }
+      );
+    }
 
     res.json({ roomId: room._id, messages: rows.reverse() });
   }
@@ -52,7 +60,8 @@ router.post(
   requireRole(["admin", "developer", "client"]),
   async (req, res) => {
     const { projectId } = req.params;
-    const { text = "", attachments = [] } = req.body;
+    const body = normalizeMessageBody(req.body || {});
+    if (!body.ok) return res.status(400).json({ error: body.message });
 
     const project = await Project.findById(projectId)
       .select("_id client developer")
@@ -79,8 +88,9 @@ router.post(
       project: project._id,
       author: req.user._id,
       authorRoleAtSend: req.user.role,
-      text: text.trim(),
-      attachments,
+      text: body.text,
+      attachments: body.attachments,
+      readBy: [req.user._id],
     });
 
     room.lastMessageAt = msg.sentAt;

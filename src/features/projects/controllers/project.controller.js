@@ -1,5 +1,8 @@
 // backend/src/features/projects/controllers/project.controller.js
 import Project from '../../../models/Project.js';
+import { cleanPublicUrl, cleanText } from '../../../lib/validation.js';
+import { createSignedUrl, removePath } from '../../../lib/supabase.js';
+import { pathBelongsToProjectPurpose } from '../../../lib/filePolicy.js';
 
 /* Populate user refs consistently */
 const POP = [
@@ -16,8 +19,15 @@ const PORTFOLIO_FIELDS = [
   'platform',
   'technologies',
   'repositoryUrl',
+  'repositoryFullName',
+  'repositoryId',
+  'repositoryUpdatedAt',
+  'sourceImportedAt',
+  'coverSource',
+  'categories',
   'liveUrl',
   'thumbnail',
+  'coverImage',
   'mockupImages',
   'galleryImages',
   'featured',
@@ -83,7 +93,47 @@ function sortSpec(value = '') {
 }
 
 function addRegexFilter(cond, field, value) {
-  if (value) cond[field] = { $regex: value, $options: 'i' };
+  if (value) cond[field] = { $regex: escapeRegex(cleanText(value, 120)), $options: 'i' };
+}
+
+function escapeRegex(value = '') {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function portfolioValidationError(source = {}) {
+  for (const key of ['repositoryUrl', 'liveUrl', 'thumbnail']) {
+    if (source[key] && !cleanPublicUrl(source[key])) return `${key} must be a valid http or https URL`;
+  }
+  if (
+    source.coverImage?.path &&
+    !pathBelongsToProjectPurpose(source.coverImage.path, source._id || source.projectId, 'cover')
+  ) {
+    return 'coverImage must belong to this project';
+  }
+  return '';
+}
+
+async function refreshStoredFile(file) {
+  if (!file?.path) return file;
+  try {
+    file.url = await createSignedUrl(file.path);
+  } catch {
+    file.url = '';
+  }
+  return file;
+}
+
+async function presentProject(project) {
+  if (!project) return project;
+  const value = typeof project.toObject === 'function' ? project.toObject() : project;
+  if (value.coverImage?.path) {
+    await refreshStoredFile(value.coverImage);
+    value.thumbnail = value.coverImage.url || '';
+  }
+  await Promise.all(
+    (value.evidence || []).flatMap((entry) => (entry.images || []).map(refreshStoredFile))
+  );
+  return value;
 }
 
 /** GET /api/projects?status=&q=&classification=&industry=&published=&featured=&sort= */
@@ -114,7 +164,7 @@ export async function listProjects(req, res) {
   addRegexFilter(cond, 'platform', platform);
 
   if (q) {
-    const rx = { $regex: q, $options: 'i' };
+    const rx = { $regex: escapeRegex(cleanText(q, 120)), $options: 'i' };
     cond.$or = [
       { title: rx },
       { slug: rx },
@@ -129,7 +179,8 @@ export async function listProjects(req, res) {
     ];
   }
 
-  const projects = await Project.find(cond).sort(sortSpec(sort)).populate(POP);
+  const rows = await Project.find(cond).sort(sortSpec(sort)).populate(POP);
+  const projects = await Promise.all(rows.map(presentProject));
   res.json({ projects, total: projects.length });
 }
 
@@ -142,7 +193,7 @@ export async function listPublicProjects(req, res) {
   if (classification) cond.projectClassification = classification;
   if (websiteType) cond.websiteType = websiteType;
   if (q) {
-    const rx = { $regex: q, $options: 'i' };
+    const rx = { $regex: escapeRegex(cleanText(q, 120)), $options: 'i' };
     cond.$or = [
       { title: rx },
       { summary: rx },
@@ -161,7 +212,7 @@ export async function listPublicProjects(req, res) {
     .sort({ featured: -1, displayOrder: 1, completionDate: -1, createdAt: -1 })
     .lean();
 
-  res.json({ projects });
+  res.json({ projects: await Promise.all(projects.map(presentProject)) });
 }
 
 /** GET /api/public/projects/:slug */
@@ -169,7 +220,7 @@ export async function getPublicProject(req, res) {
   const { slug } = req.params;
   const project = await Project.findOne({ slug, published: true }).select(PUBLIC_SELECT).lean();
   if (!project) return res.status(404).json({ message: 'Project not found' });
-  res.json({ project });
+  res.json({ project: await presentProject(project) });
 }
 
 /** GET /api/projects/:projectId */
@@ -178,7 +229,7 @@ export async function getProject(req, res) {
   const project = await Project.findById(projectId).populate(POP);
   if (!project) return res.status(404).json({ message: 'Project not found' });
   if (!canReadProject(req.user, project)) return res.status(403).json({ message: 'Forbidden' });
-  res.json({ project });
+  res.json({ project: await presentProject(project) });
 }
 
 /** POST /api/projects  (admin) */
@@ -192,6 +243,8 @@ export async function createProject(req, res) {
     ...rest
   } = req.body || {};
   if (!title?.trim()) return res.status(400).json({ message: 'Title is required' });
+  const validationError = portfolioValidationError({ ...rest, projectId: rest._id });
+  if (validationError) return res.status(400).json({ message: validationError });
 
   const portfolioPatch = {};
   for (const key of PORTFOLIO_FIELDS) {
@@ -208,7 +261,7 @@ export async function createProject(req, res) {
   });
 
   const project = await Project.findById(created._id).populate(POP);
-  res.status(201).json({ project });
+  res.status(201).json({ project: await presentProject(project) });
 }
 
 /**
@@ -229,6 +282,9 @@ export async function updateProject(req, res) {
   if (!isAdmin && !isAssignedDev) {
     return res.status(403).json({ message: 'Forbidden' });
   }
+
+  const validationError = portfolioValidationError({ ...(req.body || {}), projectId });
+  if (validationError) return res.status(400).json({ message: validationError });
 
   // Build patch based on role
   const adminAllowed = [
@@ -258,12 +314,41 @@ export async function updateProject(req, res) {
     }
   }
 
+  const previousCoverPath = project.coverImage?.path || '';
   const updated = await Project.findByIdAndUpdate(projectId, patch, {
     new: true,
     runValidators: true,
   }).populate(POP);
 
-  res.json({ project: updated });
+  let cleanupPending = false;
+  const nextCoverPath = updated?.coverImage?.path || '';
+  if (previousCoverPath && nextCoverPath && previousCoverPath !== nextCoverPath) {
+    try {
+      await removePath(previousCoverPath);
+    } catch {
+      cleanupPending = true;
+    }
+  }
+
+  res.json({ project: await presentProject(updated), cleanupPending });
+}
+
+/** DELETE /api/projects/:projectId/cover (admin) */
+export async function deleteProjectCover(req, res) {
+  const { projectId } = req.params;
+  const project = await Project.findById(projectId);
+  if (!project) return res.status(404).json({ message: 'Project not found' });
+  const storagePath = project.coverImage?.path || '';
+  if (storagePath) {
+    if (!pathBelongsToProjectPurpose(storagePath, projectId, 'cover')) {
+      return res.status(409).json({ message: 'Stored cover path is outside this project' });
+    }
+    await removePath(storagePath);
+  }
+  project.coverImage = undefined;
+  project.thumbnail = '';
+  await project.save();
+  res.json({ ok: true, project: await presentProject(project) });
 }
 
 /** DELETE /api/projects/:projectId (admin)
@@ -334,17 +419,25 @@ export async function addEvidence(req, res) {
   if (!project) return res.status(404).json({ message: 'Project not found' });
   if (!canWriteProject(me, project)) return res.status(403).json({ message: 'Forbidden' });
 
+  const cleanImages = Array.isArray(images) ? images.slice(0, 20) : [];
+  if (cleanImages.some((image) => !image?.path || !pathBelongsToProjectPurpose(image.path, projectId, 'evidence'))) {
+    return res.status(400).json({ message: 'Evidence files must belong to this project' });
+  }
+  const cleanLinks = Array.isArray(links)
+    ? links.slice(0, 20).map(cleanPublicUrl).filter(Boolean)
+    : [];
+
   project.evidence.unshift({
     title: String(title || 'Update'),
-    links: Array.isArray(links) ? links : [],
-    images: Array.isArray(images) ? images : [],
+    links: cleanLinks,
+    images: cleanImages,
     ts: Date.now(),
     author: me._id,
   });
 
   await project.save();
   const populated = await Project.findById(projectId).populate(POP);
-  res.status(201).json({ ok: true, project: populated });
+  res.status(201).json({ ok: true, project: await presentProject(populated) });
 }
 
 // ─────────────────────────────────────────────────────────────

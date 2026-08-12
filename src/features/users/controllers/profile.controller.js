@@ -1,8 +1,10 @@
 // backend/src/features/users/controllers/profile.controller.js
 import multer from 'multer';
-import path from 'path';
-import { ensureStorageReady, SUPA_BUCKET } from '../../../lib/supabase.js';
+import { removePath, uploadBuffer } from '../../../lib/supabase.js';
 import User from '../../../models/User.js';
+import { cleanFileName, validateUpload } from '../../../lib/filePolicy.js';
+import { cleanPublicUrl, cleanText } from '../../../lib/validation.js';
+import { presentUser } from '../../../lib/presentUser.js';
 
 // in-memory file buffer
 export const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } }); // 5MB
@@ -56,7 +58,13 @@ function cleanProfilePatch(body = {}) {
       continue;
     }
 
-    patch[key] = String(body[key] || '').trim();
+    if (key === 'businessWebsite') {
+      patch[key] = body[key] ? cleanPublicUrl(body[key]) : '';
+      continue;
+    }
+
+    const maxLength = key === 'bio' ? 2000 : key === 'projectContactPreference' ? 500 : 180;
+    patch[key] = cleanText(body[key], maxLength);
   }
 
   return patch;
@@ -66,11 +74,14 @@ function cleanProfilePatch(body = {}) {
 export async function getMyProfile(req, res) {
   const user = await User.findById(req.user?._id).select('-password').lean();
   if (!user) return res.status(404).json({ message: 'User not found' });
-  res.json({ user });
+  res.json({ user: await presentUser(user) });
 }
 
 // PATCH /api/users/me
 export async function updateMyProfile(req, res) {
+  if (req.body?.businessWebsite && !cleanPublicUrl(req.body.businessWebsite)) {
+    return res.status(400).json({ message: 'Website must be a valid http or https URL' });
+  }
   const patch = cleanProfilePatch(req.body || {});
   const user = await User.findByIdAndUpdate(req.user?._id, patch, {
     new: true,
@@ -78,7 +89,7 @@ export async function updateMyProfile(req, res) {
   }).select('-password');
 
   if (!user) return res.status(404).json({ message: 'User not found' });
-  res.json({ user });
+  res.json({ user: await presentUser(user) });
 }
 
 // POST /api/users/me/avatar  (form-data: avatar)
@@ -87,41 +98,34 @@ export async function setMyAvatar(req, res) {
     const file = req.file;
     if (!file) return res.status(400).json({ message: 'Avatar file is required' });
 
-    const client = ensureStorageReady();
+    const verdict = validateUpload(file, 'avatar');
+    if (!verdict.ok) return res.status(415).json({ message: verdict.message });
+
     const user = await User.findById(req.user?._id);
     if (!user) return res.status(404).json({ message: 'User not found' });
 
-    const ext = path.extname(file.originalname || '').toLowerCase() || '.png';
-    const safeName = (file.originalname || 'avatar').replace(/[^\w.-]+/g, '_');
+    const safeName = cleanFileName(file.originalname || 'avatar');
     const ts = Date.now();
     const storePath = `avatars/${user._id}/${ts}-${safeName}`;
     const contentType = file.mimetype || 'image/png';
 
-    // upload to Supabase
-    const { error: upErr } = await client
-      .storage
-      .from(SUPA_BUCKET)
-      .upload(storePath, file.buffer, { contentType, upsert: true });
+    const uploaded = await uploadBuffer(storePath, file.buffer, contentType);
+    const oldPath = user.avatarPath;
 
-    if (upErr) {
-      console.error('Supabase upload error:', upErr);
-      return res.status(500).json({ message: 'Upload failed' });
-    }
-
-    // public URL
-    const { data: pub } = client.storage.from(SUPA_BUCKET).getPublicUrl(storePath);
-    const publicUrl = pub?.publicUrl || '';
-
-    // Optionally remove old file if exists and different
-    if (user.avatarPath && user.avatarPath !== storePath) {
-      await client.storage.from(SUPA_BUCKET).remove([user.avatarPath]).catch(() => {});
-    }
-
-    user.avatarUrl = publicUrl;
+    user.avatarUrl = uploaded.url;
     user.avatarPath = storePath;
     await user.save();
 
-    res.json({ ok: true, avatarUrl: publicUrl });
+    let cleanupPending = false;
+    if (oldPath && oldPath !== storePath) {
+      try {
+        await removePath(oldPath);
+      } catch {
+        cleanupPending = true;
+      }
+    }
+
+    res.json({ ok: true, avatarUrl: uploaded.url, cleanupPending });
   } catch (e) {
     console.error('setMyAvatar error:', e.code || e.message);
     res.status(e.status || 500).json({ message: e.status === 503 ? 'File storage is unavailable' : 'Server error' });
@@ -131,13 +135,12 @@ export async function setMyAvatar(req, res) {
 // DELETE /api/users/me/avatar
 export async function deleteMyAvatar(_req, res) {
   try {
-    const client = ensureStorageReady();
     const user = await User.findById(_req.user?._id);
     if (!user) return res.status(404).json({ message: 'User not found' });
 
     // remove from storage if present
     if (user.avatarPath) {
-      await client.storage.from(SUPA_BUCKET).remove([user.avatarPath]).catch(() => {});
+      await removePath(user.avatarPath);
     }
 
     user.avatarUrl = '';

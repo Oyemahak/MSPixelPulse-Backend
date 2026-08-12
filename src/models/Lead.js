@@ -16,7 +16,7 @@ const LeadSchema = new mongoose.Schema(
     sourceUrl: { type: String, trim: true, default: "" },
     status: {
       type: String,
-      enum: ["new", "contacted", "qualified", "completed", "spam"],
+      enum: ["new", "contacted", "qualified", "completed", "spam", "archived"],
       default: "new",
       index: true,
     },

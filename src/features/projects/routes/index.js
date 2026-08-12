@@ -21,6 +21,7 @@ router.patch("/:projectId", requireAuth, ctrl.updateProject);
 router.patch("/:projectId/archive", requireAuth, requireRole("admin"), ctrl.archiveProject);
 router.patch("/:projectId/publish", requireAuth, requireRole("admin"), ctrl.publishProject);
 router.patch("/:projectId/feature", requireAuth, requireRole("admin"), ctrl.featureProject);
+router.delete("/:projectId/cover", requireAuth, requireRole("admin"), ctrl.deleteProjectCover);
 router.delete("/:projectId", requireAuth, requireRole("admin"), ctrl.deleteProject);
 
 /* Requirements */

@@ -1,6 +1,9 @@
 // backend/src/features/projects/controllers/invoice.controller.js
 import Invoice from "../../../models/Invoice.js";
 import Project from "../../../models/Project.js";
+import { createSignedUrl, removePath } from "../../../lib/supabase.js";
+import { pathBelongsToProjectPurpose } from "../../../lib/filePolicy.js";
+import { cleanText } from "../../../lib/validation.js";
 
 const VALID_STATUSES = ["draft", "sent", "uploaded", "paid", "archived"];
 
@@ -12,9 +15,21 @@ function canRead(user, project) {
 }
 function canWrite(user, project) {
   if (!user || !project) return false;
-  if (user.role === "admin") return true;
-  // developer may upload deliverable-related invoices if you want; default no
-  return String(project.client) === String(user._id);
+  return user.role === "admin";
+}
+
+function normalizeKind(value) {
+  return ['advance', 'final', 'other'].includes(value) ? value : '';
+}
+
+async function freshInvoiceFile(invoice) {
+  if (!invoice?.file?.path) return invoice;
+  try {
+    invoice.file.url = await createSignedUrl(invoice.file.path);
+  } catch {
+    invoice.file.url = '';
+  }
+  return invoice;
 }
 
 function normalizeLineItems(items = []) {
@@ -48,15 +63,15 @@ function buildInvoicePayload(body = {}, project, user, existing = {}) {
   const payload = {
     client: project.client || existing.client || null,
     kind: body.kind || existing.kind || "advance",
-    invoiceNumber: body.invoiceNumber ?? existing.invoiceNumber ?? "",
-    title: body.title ?? existing.title ?? "",
+    invoiceNumber: cleanText(body.invoiceNumber ?? existing.invoiceNumber ?? "", 80),
+    title: cleanText(body.title ?? existing.title ?? "", 160),
     currency: body.currency ?? existing.currency ?? "CAD",
     lineItems,
     subtotal,
     taxLabel: body.taxLabel ?? existing.taxLabel ?? "",
     taxAmount,
     total,
-    notes: body.notes ?? existing.notes ?? "",
+    notes: cleanText(body.notes ?? existing.notes ?? "", 2000),
     isDemo: body.isDemo ?? existing.isDemo ?? false,
   };
 
@@ -74,9 +89,9 @@ export async function listInvoices(req, res, next) {
     const project = await Project.findById(projectId).lean();
     if (!project) return res.status(404).json({ error: "Project not found" });
     if (!canRead(req.user, project)) return res.status(403).json({ error: "Forbidden" });
-    const filter = { project: projectId };
-    if (req.user?.role !== "admin") filter.status = { $ne: "archived" };
+    const filter = { project: projectId, status: { $ne: "archived" } };
     const rows = await Invoice.find(filter).sort({ createdAt: -1 }).lean();
+    await Promise.all(rows.map(freshInvoiceFile));
     res.json({ invoices: rows });
   } catch (err) {
     next(err);
@@ -93,14 +108,16 @@ export async function createInvoice(req, res, next) {
 
     const body = req.body || {};
     const file = body.file;
+    const kind = normalizeKind(body.kind || 'advance');
+    if (!kind) return res.status(400).json({ error: 'Invalid invoice kind' });
     const hasInvoiceDetails =
       body.invoiceNumber ||
       body.title ||
       (Array.isArray(body.lineItems) && body.lineItems.length > 0) ||
       body.dueDate;
 
-    if (!file?.path && req.user.role !== "admin") {
-      return res.status(400).json({ error: "file {path,url,name,type,size} required" });
+    if (file?.path && !pathBelongsToProjectPurpose(file.path, projectId, 'invoice')) {
+      return res.status(400).json({ error: 'Invoice file does not belong to this project' });
     }
     if (!file?.path && !hasInvoiceDetails) {
       return res.status(400).json({ error: "Invoice details or file {path,url,name,type,size} required" });
@@ -113,9 +130,12 @@ export async function createInvoice(req, res, next) {
         ? "uploaded"
         : "draft";
 
+    const duplicate = await Invoice.findOne({ project: projectId, kind, status: { $ne: 'archived' } }).select('_id').lean();
+    if (duplicate) return res.status(409).json({ error: 'Delete the current invoice before uploading a replacement' });
+
     const doc = await Invoice.create({
       project: projectId,
-      ...buildInvoicePayload(body, project, req.user),
+      ...buildInvoicePayload({ ...body, kind }, project, req.user),
       status,
       paidAt: status === "paid" ? new Date() : null,
     });
@@ -134,6 +154,7 @@ export async function updateInvoice(req, res, next) {
     const doc = await Invoice.findOne({ _id: invoiceId, project: projectId });
     if (!doc) return res.status(404).json({ error: "Invoice not found" });
 
+    if (body.file) return res.status(400).json({ error: 'Use delete and re-upload to replace an invoice file' });
     const patch = buildInvoicePayload(body, { client: doc.client }, req.user, doc.toObject());
     if (body.status) {
       if (!VALID_STATUSES.includes(body.status)) return res.status(400).json({ error: "Invalid status" });
@@ -156,9 +177,14 @@ export async function deleteInvoice(req, res, next) {
     const { projectId, invoiceId } = req.params;
     const doc = await Invoice.findOne({ _id: invoiceId, project: projectId });
     if (!doc) return res.status(404).json({ error: "Invoice not found" });
-    doc.status = "archived";
-    await doc.save();
-    res.json({ ok: true, invoice: doc });
+    if (doc.file?.path) {
+      if (!pathBelongsToProjectPurpose(doc.file.path, projectId, 'invoice')) {
+        return res.status(409).json({ error: 'Stored file path is outside this project; deletion stopped' });
+      }
+      await removePath(doc.file.path);
+    }
+    await doc.deleteOne();
+    res.json({ ok: true, deletedId: String(doc._id) });
   } catch (err) {
     next(err);
   }

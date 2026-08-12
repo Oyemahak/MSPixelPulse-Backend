@@ -18,6 +18,7 @@
     "seed:portal-demo": "node src/scripts/seedPortalDemo.js",
     "seed:demo-invoice": "node src/scripts/seedDemoInvoice.js",
     "seed:projects": "node src/scripts/seedProjects.js",
+    "seed:content": "node src/scripts/seedContent.js",
     "cleanup:dummy:dry": "node src/scripts/cleanupDummy.js",
     "cleanup:dummy": "node src/scripts/cleanupDummy.js --confirm",
     "cleanup:storage:dry": "node src/scripts/storageCleanupDryRun.js"

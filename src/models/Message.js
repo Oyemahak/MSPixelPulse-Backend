@@ -6,7 +6,9 @@ const Attachment = new Schema(
     name: String,
     url: String,
     mime: String,
+    type: String,
     size: Number,
+    path: String,
   },
   { _id: false }
 );
@@ -27,6 +29,7 @@ const MessageSchema = new Schema(
 
     text: { type: String, default: '' },
     attachments: [Attachment],
+    readBy: [{ type: Types.ObjectId, ref: 'User' }],
     sentAt: { type: Date, default: Date.now, index: true },
   },
   { timestamps: true }
@@ -34,5 +37,6 @@ const MessageSchema = new Schema(
 
 MessageSchema.index({ kind: 1, thread: 1, sentAt: 1 });
 MessageSchema.index({ kind: 1, project: 1, sentAt: 1 });
+MessageSchema.index({ author: 1, readBy: 1, sentAt: -1 });
 
 export default mongoose.model('Message', MessageSchema);

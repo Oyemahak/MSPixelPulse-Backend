@@ -6,6 +6,7 @@ const ThreadSchema = new Schema(
     type: { type: String, enum: ["dm"], default: "dm" },
     // Do NOT also set { index: true } here if you’re adding schema.index(...) below.
     participants: [{ type: Types.ObjectId, ref: "User" }], // exactly two users
+    participantKey: { type: String, trim: true, unique: true, sparse: true, index: true },
     lastMessageAt: { type: Date, default: null, index: true },
   },
   { timestamps: true }

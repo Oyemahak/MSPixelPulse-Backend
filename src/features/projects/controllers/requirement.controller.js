@@ -2,7 +2,9 @@
 import multer from "multer";
 import Requirement from "../../../models/Requirement.js";
 import Project from "../../../models/Project.js";
-import { uploadBuffer } from "../../../lib/supabase.js";
+import { createSignedUrl, removePaths, uploadBuffer } from "../../../lib/supabase.js";
+import { cleanFileName, validateUpload } from "../../../lib/filePolicy.js";
+import { cleanText } from "../../../lib/validation.js";
 
 function canRead(user, project) {
   if (!user || !project) return false;
@@ -24,8 +26,39 @@ function canWrite(user, project) {
  */
 export const memUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 25 * 1024 * 1024 }, // 25MB/file
+  limits: { fileSize: 15 * 1024 * 1024, files: 30 },
 });
+
+function filePaths(requirement) {
+  if (!requirement) return [];
+  return [
+    requirement.logo?.path,
+    requirement.brief?.path,
+    ...(requirement.supporting || []).map((file) => file.path),
+    ...(requirement.pages || []).flatMap((page) => (page.files || []).map((file) => file.path)),
+  ].filter(Boolean);
+}
+
+async function refreshRef(file) {
+  if (!file?.path) return file;
+  try {
+    file.url = await createSignedUrl(file.path);
+  } catch {
+    file.url = '';
+  }
+  return file;
+}
+
+async function presentRequirement(requirement) {
+  if (!requirement) return null;
+  await Promise.all([
+    refreshRef(requirement.logo),
+    refreshRef(requirement.brief),
+    ...(requirement.supporting || []).map(refreshRef),
+    ...(requirement.pages || []).flatMap((page) => (page.files || []).map(refreshRef)),
+  ]);
+  return requirement;
+}
 
 /**
  * GET /api/projects/:projectId/requirements
@@ -36,7 +69,7 @@ export async function getRequirement(req, res) {
   if (!project) return res.status(404).json({ message: "Project not found" });
   if (!canRead(req.user, project)) return res.status(403).json({ message: "Forbidden" });
   const doc = await Requirement.findOne({ project: projectId }).lean();
-  res.json({ ok: true, requirement: doc || null });
+  res.json({ ok: true, requirement: await presentRequirement(doc) });
 }
 
 /**
@@ -65,6 +98,11 @@ export async function upsertRequirement(req, res) {
   if (!targetProject) return res.status(404).json({ message: "Project not found" });
   if (!canWrite(me, targetProject)) return res.status(403).json({ message: "Forbidden" });
 
+  for (const file of Array.isArray(req.files) ? req.files : Object.values(req.files || {}).flat()) {
+    const verdict = validateUpload(file, 'requirement');
+    if (!verdict.ok) return res.status(415).json({ message: verdict.message });
+  }
+
   const filesByField = Array.isArray(req.files)
     ? req.files.reduce((acc, file) => {
         if (!acc[file.fieldname]) acc[file.fieldname] = [];
@@ -73,14 +111,13 @@ export async function upsertRequirement(req, res) {
       }, {})
     : (req.files || {});
 
-  const clean = (s) => String(s || "").replace(/[^\w.\- ]+/g, "_");
-  const norm = (s) => String(s || "").trim();
+  const norm = (s) => cleanText(s, 120);
   const keyOf = (s) => norm(s).toLowerCase();
 
   async function put(one, keyPath) {
     if (!one) return null;
-    const original = one.originalname || "file";
-    const path = `projects/${projectId}/${keyPath}/${now}_${clean(original)}`;
+    const original = cleanFileName(one.originalname || "file");
+    const path = `projects/${projectId}/${keyPath}/${now}_${original}`;
     const { url } = await uploadBuffer(path, one.buffer, one.mimetype || "application/octet-stream");
     return { name: original, type: one.mimetype, size: one.size, path, url };
   }
@@ -95,10 +132,17 @@ export async function upsertRequirement(req, res) {
     new Requirement({ project: projectId });
 
   const next = current.toObject();
+  const replacedPaths = [];
 
   // Core uploads (replace field only)
-  if (filesByField?.logo?.[0]) next.logo  = await put(filesByField.logo[0], "core/logo");
-  if (filesByField?.brief?.[0]) next.brief = await put(filesByField.brief[0], "core/brief");
+  if (filesByField?.logo?.[0]) {
+    if (next.logo?.path) replacedPaths.push(next.logo.path);
+    next.logo = await put(filesByField.logo[0], "core/logo");
+  }
+  if (filesByField?.brief?.[0]) {
+    if (next.brief?.path) replacedPaths.push(next.brief.path);
+    next.brief = await put(filesByField.brief[0], "core/brief");
+  }
 
   // Supporting docs (append)
   if (Array.isArray(filesByField?.supporting) && filesByField.supporting.length) {
@@ -137,13 +181,13 @@ export async function upsertRequirement(req, res) {
       const cur = map.get(k);
       map.set(k, {
         name,
-        note: meta.note !== undefined ? String(meta.note || "") : cur.note,
+        note: meta.note !== undefined ? cleanText(meta.note, 2000) : cur.note,
         files: [...(cur.files || []), ...newFiles],
       });
     } else {
       map.set(k, {
         name,
-        note: String(meta.note || ""),
+        note: cleanText(meta.note, 2000),
         files: newFiles,
       });
     }
@@ -158,10 +202,19 @@ export async function upsertRequirement(req, res) {
   }
 
   next.pages = Array.from(map.values());
+  next.client = targetProject.client || next.client || null;
 
   // Persist requirements
   current.set(next);
   const saved = await current.save();
+  let cleanupPending = false;
+  if (replacedPaths.length) {
+    try {
+      await removePaths(replacedPaths);
+    } catch {
+      cleanupPending = true;
+    }
+  }
 
   // If the updater is the client, auto-log a brief announcement so Admin/Dev see it
   if (me?.role === 'client') {
@@ -178,7 +231,7 @@ export async function upsertRequirement(req, res) {
     }
   }
 
-  res.json({ ok: true, requirement: saved.toObject() });
+  res.json({ ok: true, requirement: await presentRequirement(saved.toObject()), cleanupPending });
 }
 
 /**
@@ -201,12 +254,16 @@ export async function setReview(req, res) {
 
 /**
  * DELETE /api/projects/:projectId/requirements
- * Role: admin — removes the whole requirements doc (does not purge storage).
+ * Role: admin — removes the requirements document and its exact storage objects.
  */
 export async function deleteRequirement(req, res) {
   const { projectId } = req.params;
   const project = await Project.findById(projectId).select("_id").lean();
   if (!project) return res.status(404).json({ message: "Project not found" });
-  await Requirement.findOneAndDelete({ project: projectId });
+  const requirement = await Requirement.findOne({ project: projectId }).lean();
+  if (requirement) {
+    await removePaths(filePaths(requirement));
+    await Requirement.deleteOne({ _id: requirement._id });
+  }
   res.json({ ok: true });
 }

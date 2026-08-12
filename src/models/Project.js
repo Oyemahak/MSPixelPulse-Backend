@@ -9,6 +9,8 @@ const EvidenceImageSchema = new mongoose.Schema(
   {
     name: { type: String, trim: true },
     type: { type: String, trim: true },
+    size: { type: Number, min: 0 },
+    path: { type: String, trim: true },
     url:  { type: String, trim: true, required: true },
   },
   { _id: false }
@@ -47,6 +49,17 @@ const ProjectImageSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const StoredFileSchema = new mongoose.Schema(
+  {
+    name: { type: String, trim: true, default: '' },
+    type: { type: String, trim: true, default: '' },
+    size: { type: Number, min: 0, default: 0 },
+    path: { type: String, trim: true, required: true },
+    url: { type: String, trim: true, default: '' },
+  },
+  { _id: false }
+);
+
 // ─────────────────────────────────────────────────────────────
 // Project
 // ─────────────────────────────────────────────────────────────
@@ -72,7 +85,7 @@ const ProjectSchema = new mongoose.Schema(
     fullDescription: { type: String, default: '', trim: true },
     projectClassification: {
       type: String,
-      enum: ['live', 'demo', 'concept'],
+      enum: ['live', 'demo', 'technical', 'concept'],
       default: 'demo',
       index: true,
     },
@@ -81,8 +94,15 @@ const ProjectSchema = new mongoose.Schema(
     platform: { type: String, default: '', trim: true },
     technologies: [{ type: String, trim: true }],
     repositoryUrl: { type: String, default: '', trim: true },
+    repositoryFullName: { type: String, default: '', trim: true, lowercase: true },
+    repositoryId: { type: String, default: '', trim: true },
+    repositoryUpdatedAt: { type: Date, default: null },
+    sourceImportedAt: { type: Date, default: null },
+    coverSource: { type: String, enum: ['', 'site-screenshot', 'repository-asset', 'branded-cover', 'fallback'], default: '' },
+    categories: [{ type: String, trim: true }],
     liveUrl: { type: String, default: '', trim: true },
     thumbnail: { type: String, default: '', trim: true },
+    coverImage: { type: StoredFileSchema, default: null },
     mockupImages: { type: [ProjectImageSchema], default: [] },
     galleryImages: { type: [ProjectImageSchema], default: [] },
     featured: { type: Boolean, default: false, index: true },
@@ -103,6 +123,14 @@ const ProjectSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+ProjectSchema.index(
+  { repositoryFullName: 1 },
+  { unique: true, partialFilterExpression: { repositoryFullName: { $type: 'string', $gt: '' } } }
+);
+ProjectSchema.index({ published: 1, featured: -1, displayOrder: 1, completionDate: -1 });
+ProjectSchema.index({ client: 1, status: 1 });
+ProjectSchema.index({ developer: 1, status: 1 });
 
 // Produce a stable unique slug. If a seed/admin payload provides a slug, keep it.
 ProjectSchema.pre('validate', async function (next) {

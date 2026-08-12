@@ -20,7 +20,9 @@ export async function requireAuth(req, res, next) {
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
     const user = await User.findById(userId).select("-password");
-    if (!user) return res.status(401).json({ message: "Unauthorized" });
+    if (!user || user.status !== "active" || user.accountStatus === "suspended") {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
 
     req.user = user;
     next();
@@ -37,7 +39,7 @@ export async function optionalAuth(req, _res, next) {
     const userId = payload.id || payload.sub;
     if (!userId) return next();
     const user = await User.findById(userId).select("-password");
-    if (user) req.user = user;
+    if (user?.status === "active" && user.accountStatus !== "suspended") req.user = user;
   } catch {
     // Public engagement remains available when an optional token is absent or stale.
   }

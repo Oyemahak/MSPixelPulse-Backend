@@ -13,6 +13,14 @@ const UserSchema = new mongoose.Schema(
     isSuperAdmin: { type: Boolean, default: false, index: true },
     isProtected: { type: Boolean, default: false, index: true },
     protectedReason: { type: String, trim: true, default: '' },
+    accessApplication: {
+      status: { type: String, enum: ['pending', 'approved', 'declined'], default: 'pending' },
+      requestedRole: { type: String, enum: ['client'], default: 'client' },
+      submittedAt: { type: Date, default: Date.now },
+      decidedAt: { type: Date, default: null },
+      decidedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+      decisionNote: { type: String, trim: true, default: '' },
+    },
 
     // NEW: avatar fields
     avatarUrl: { type: String, trim: true, default: '' },  // public URL for header
@@ -49,6 +57,8 @@ UserSchema.pre('save', async function (next) {
   this.password = await bcrypt.hash(this.password, 10);
   next();
 });
+
+UserSchema.index({ status: 1, createdAt: -1 });
 
 UserSchema.methods.comparePassword = function (plain) {
   return bcrypt.compare(plain, this.password);

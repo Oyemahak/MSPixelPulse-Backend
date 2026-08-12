@@ -105,5 +105,14 @@ export function getPublicUrl(path) {
 export async function removePath(path) {
   if (!path) return;
   const client = ensureStorageReady();
-  await client.storage.from(SUPA_BUCKET).remove([path]).catch(() => {});
+  const { error } = await client.storage.from(SUPA_BUCKET).remove([path]);
+  if (error) throw error;
+}
+
+export async function removePaths(paths = []) {
+  const unique = [...new Set((paths || []).filter(Boolean))];
+  if (!unique.length) return;
+  const client = ensureStorageReady();
+  const { error } = await client.storage.from(SUPA_BUCKET).remove(unique);
+  if (error) throw error;
 }
