@@ -1,5 +1,6 @@
 import path from 'path';
 import { getGoogleApis } from './auth.js';
+import { guardPhase1DriveRootId } from './phase1SmokeSafety.js';
 import { withGoogleRetry } from './retry.js';
 
 function envId(name) {
@@ -11,7 +12,7 @@ function envId(name) {
     error.envName = name;
     throw error;
   }
-  return value;
+  return guardPhase1DriveRootId(name, value);
 }
 
 export function googleDriveRoots() {
@@ -167,4 +168,3 @@ export class GoogleDriveService {
 }
 
 export const googleDrive = new GoogleDriveService();
-

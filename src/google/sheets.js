@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { getGoogleApis } from './auth.js';
+import { guardPhase1SpreadsheetId } from './phase1SmokeSafety.js';
 import { withGoogleRetry } from './retry.js';
 
 export const GOOGLE_SHEET_TABS = Object.freeze({
@@ -30,7 +31,19 @@ function spreadsheetId() {
     error.envName = 'GOOGLE_DATABASE_SPREADSHEET_ID';
     throw error;
   }
-  return value;
+  return guardPhase1SpreadsheetId(value);
+}
+
+function resolveSpreadsheetId(source = spreadsheetId) {
+  const value = typeof source === 'function' ? source() : source;
+  const resolved = String(value || '').trim();
+  if (!resolved) {
+    const error = new Error('A Google spreadsheet ID is required');
+    error.code = 'GOOGLE_ENV_MISSING';
+    error.status = 503;
+    throw error;
+  }
+  return guardPhase1SpreadsheetId(resolved);
 }
 
 function quotedSheetName(name) {
@@ -86,6 +99,72 @@ function matchesFilter(record, filter = {}) {
   });
 }
 
+function missingTabError(missingTabs) {
+  const error = new Error(`Google test spreadsheet is missing required tabs: ${missingTabs.join(', ')}`);
+  error.code = 'GOOGLE_SHEET_TABS_MISSING';
+  error.status = 422;
+  error.missingTabs = missingTabs;
+  return error;
+}
+
+export async function ensureGoogleSheetTabs({
+  tabs = Object.values(GOOGLE_SHEET_TABS),
+  createMissing = false,
+  spreadsheet = spreadsheetId,
+  sheetsApi,
+} = {}) {
+  const targetSpreadsheetId = resolveSpreadsheetId(spreadsheet);
+  const requiredTabs = [...new Set((tabs || []).map((tab) => String(tab || '').trim()).filter(Boolean))];
+  const sheets = sheetsApi || (await getGoogleApis()).sheets;
+
+  const readMetadata = async () => {
+    const response = await withGoogleRetry(() => sheets.spreadsheets.get({
+      spreadsheetId: targetSpreadsheetId,
+      fields: 'spreadsheetId,sheets.properties(sheetId,title)',
+    }));
+    const actualSpreadsheetId = String(response.data.spreadsheetId || '');
+    if (actualSpreadsheetId !== targetSpreadsheetId) {
+      const error = new Error('Google Sheets returned metadata for an unexpected spreadsheet.');
+      error.code = 'GOOGLE_SPREADSHEET_TARGET_MISMATCH';
+      throw error;
+    }
+    const existingTabs = (response.data.sheets || [])
+      .map((sheet) => String(sheet.properties?.title || '').trim())
+      .filter(Boolean);
+    return { actualSpreadsheetId, existingTabs };
+  };
+
+  let metadata = await readMetadata();
+  const missingTabs = requiredTabs.filter((tab) => !metadata.existingTabs.includes(tab));
+  if (missingTabs.length && !createMissing) throw missingTabError(missingTabs);
+
+  if (missingTabs.length) {
+    try {
+      await withGoogleRetry(() => sheets.spreadsheets.batchUpdate({
+        spreadsheetId: targetSpreadsheetId,
+        requestBody: {
+          requests: missingTabs.map((title) => ({ addSheet: { properties: { title } } })),
+        },
+      }));
+    } catch (cause) {
+      const error = missingTabError(missingTabs);
+      error.message = `Unable to initialize required Google test tabs. ${error.message}`;
+      error.cause = cause;
+      throw error;
+    }
+    metadata = await readMetadata();
+  }
+
+  const stillMissing = requiredTabs.filter((tab) => !metadata.existingTabs.includes(tab));
+  if (stillMissing.length) throw missingTabError(stillMissing);
+
+  return {
+    spreadsheetId: metadata.actualSpreadsheetId,
+    existingTabs: metadata.existingTabs,
+    createdTabs: missingTabs,
+  };
+}
+
 /**
  * A table adapter for one Sheet tab. Row positions are used only internally to
  * update/delete a known record; `id` is the durable application identifier.
@@ -94,7 +173,11 @@ export class GoogleSheetsRepository {
   constructor(tab, { idField = 'id', spreadsheet = spreadsheetId } = {}) {
     this.tab = tab;
     this.idField = idField;
-    this.getSpreadsheetId = spreadsheet;
+    this.spreadsheet = spreadsheet;
+  }
+
+  resolveSpreadsheetId() {
+    return resolveSpreadsheetId(this.spreadsheet);
   }
 
   async valuesApi() {
@@ -110,7 +193,7 @@ export class GoogleSheetsRepository {
   async readRows() {
     const values = await this.valuesApi();
     const response = await withGoogleRetry(() => values.get({
-      spreadsheetId: this.getSpreadsheetId(),
+      spreadsheetId: this.resolveSpreadsheetId(),
       range: `${quotedSheetName(this.tab)}!A:ZZ`,
       majorDimension: 'ROWS',
     }));
@@ -133,7 +216,7 @@ export class GoogleSheetsRepository {
     }
     const values = await this.valuesApi();
     await withGoogleRetry(() => values.update({
-      spreadsheetId: this.getSpreadsheetId(),
+      spreadsheetId: this.resolveSpreadsheetId(),
       range: `${quotedSheetName(this.tab)}!A1:${columnName(Math.max(headers.length - 1, 0))}1`,
       valueInputOption: 'RAW',
       requestBody: { values: [headers] },
@@ -184,7 +267,7 @@ export class GoogleSheetsRepository {
     const { headers } = await this.ensureHeaders(Object.keys(record));
     const values = await this.valuesApi();
     await withGoogleRetry(() => values.append({
-      spreadsheetId: this.getSpreadsheetId(),
+      spreadsheetId: this.resolveSpreadsheetId(),
       range: `${quotedSheetName(this.tab)}!A:ZZ`,
       valueInputOption: 'RAW',
       insertDataOption: 'INSERT_ROWS',
@@ -215,7 +298,7 @@ export class GoogleSheetsRepository {
     const { headers } = await this.ensureHeaders(prepared.flatMap(Object.keys));
     const values = await this.valuesApi();
     await withGoogleRetry(() => values.append({
-      spreadsheetId: this.getSpreadsheetId(),
+      spreadsheetId: this.resolveSpreadsheetId(),
       range: `${quotedSheetName(this.tab)}!A:ZZ`,
       valueInputOption: 'RAW',
       insertDataOption: 'INSERT_ROWS',
@@ -242,7 +325,7 @@ export class GoogleSheetsRepository {
     }
     const values = await this.valuesApi();
     await withGoogleRetry(() => values.update({
-      spreadsheetId: this.getSpreadsheetId(),
+      spreadsheetId: this.resolveSpreadsheetId(),
       range: `${quotedSheetName(this.tab)}!A${target.rowNumber}:${columnName(headers.length - 1)}${target.rowNumber}`,
       valueInputOption: 'RAW',
       requestBody: { values: [valuesForHeaders(headers, record)] },
@@ -256,7 +339,7 @@ export class GoogleSheetsRepository {
     if (!target) return false;
     const sheets = await this.sheetApi();
     const metadata = await withGoogleRetry(() => sheets.get({
-      spreadsheetId: this.getSpreadsheetId(),
+      spreadsheetId: this.resolveSpreadsheetId(),
       fields: 'sheets.properties',
     }));
     const sheet = (metadata.data.sheets || []).find((item) => item.properties?.title === this.tab);
@@ -267,7 +350,7 @@ export class GoogleSheetsRepository {
       throw error;
     }
     await withGoogleRetry(() => sheets.batchUpdate({
-      spreadsheetId: this.getSpreadsheetId(),
+      spreadsheetId: this.resolveSpreadsheetId(),
       requestBody: {
         requests: [{
           deleteDimension: {
@@ -285,5 +368,10 @@ export class GoogleSheetsRepository {
   }
 }
 
-export const sheetsInternals = { columnName, parsedCellValue, stableCellValue, matchesFilter };
-
+export const sheetsInternals = {
+  columnName,
+  parsedCellValue,
+  stableCellValue,
+  matchesFilter,
+  resolveSpreadsheetId,
+};

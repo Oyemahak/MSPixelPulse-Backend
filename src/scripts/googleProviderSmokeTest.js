@@ -1,25 +1,6 @@
 import 'dotenv/config';
 import assert from 'node:assert/strict';
 import bcrypt from 'bcryptjs';
-import { googleDrive } from '../google/drive.js';
-import {
-  blogCommentsRepository,
-  blogReactionsRepository,
-  blogSharesRepository,
-  blogSubscribersRepository,
-  filesRepository,
-  invoicesRepository,
-  leadsRepository,
-  messagesRepository,
-  notificationsRepository,
-  projectMembersRepository,
-  projectsRepository,
-  requirementsRepository,
-  roomsRepository,
-  siteContentRepository,
-  tasksRepository,
-  usersRepository,
-} from '../repositories/index.js';
 
 function requiredTestEnv(name) {
   const value = String(process.env[name] || '').trim();
@@ -49,14 +30,71 @@ async function roundTrip(repository, record, created) {
 const testSpreadsheet = requiredTestEnv('GOOGLE_PHASE1_TEST_SPREADSHEET_ID');
 const testDriveRoot = requiredTestEnv('GOOGLE_PHASE1_TEST_DRIVE_ROOT_FOLDER_ID');
 
-// The repositories and Drive adapter read these values at request time. A
-// caller must supply a resource isolated from all migration/prod data.
-process.env.DATA_PROVIDER = 'google';
-process.env.STORAGE_PROVIDER = 'google-drive';
+// These assignments intentionally happen before any repository or storage
+// module is loaded. Static ESM imports are hoisted and would make this unsafe.
 process.env.GOOGLE_DATABASE_SPREADSHEET_ID = testSpreadsheet;
 process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID = testDriveRoot;
 process.env.GOOGLE_DRIVE_CLIENT_FILES_FOLDER_ID = testDriveRoot;
 process.env.GOOGLE_DRIVE_PROJECT_FILES_FOLDER_ID = testDriveRoot;
+process.env.DATA_PROVIDER = 'google';
+process.env.STORAGE_PROVIDER = 'google-drive';
+process.env.GOOGLE_PHASE1_SMOKE_TEST = 'true';
+
+const { assertPhase1GoogleTargets } = await import('../google/phase1SmokeSafety.js');
+const targets = assertPhase1GoogleTargets();
+assert.equal(process.env.GOOGLE_DATABASE_SPREADSHEET_ID, testSpreadsheet);
+assert.equal(process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID, testDriveRoot);
+
+const [repositories, sheetsModule, driveModule, storageModule] = await Promise.all([
+  import('../repositories/index.js'),
+  import('../google/sheets.js'),
+  import('../google/drive.js'),
+  import('../storage/provider.js'),
+]);
+
+const {
+  blogCommentsRepository,
+  blogReactionsRepository,
+  blogSharesRepository,
+  blogSubscribersRepository,
+  filesRepository,
+  invoicesRepository,
+  leadsRepository,
+  messagesRepository,
+  notificationsRepository,
+  projectMembersRepository,
+  projectsRepository,
+  requirementsRepository,
+  roomsRepository,
+  siteContentRepository,
+  tasksRepository,
+  usersRepository,
+} = repositories;
+const { ensureGoogleSheetTabs, GOOGLE_SHEET_TABS } = sheetsModule;
+const { googleDrive } = driveModule;
+const { getStorageProvider } = storageModule;
+
+assert.equal(getStorageProvider().name, 'google-drive');
+console.log(JSON.stringify({
+  event: 'google-provider-smoke-targets',
+  sheetsApiUrl: `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(targets.spreadsheetId)}`,
+  spreadsheetId: targets.spreadsheetId,
+  driveApiUrl: 'https://www.googleapis.com/drive/v3/files',
+  driveRootFolderId: targets.driveRootFolderId,
+}));
+
+const initializedTabs = await ensureGoogleSheetTabs({
+  tabs: Object.values(GOOGLE_SHEET_TABS),
+  createMissing: true,
+  spreadsheet: testSpreadsheet,
+});
+assert.equal(initializedTabs.spreadsheetId, testSpreadsheet);
+console.log(JSON.stringify({
+  event: 'google-provider-smoke-tabs',
+  spreadsheetId: initializedTabs.spreadsheetId,
+  createdTabs: initializedTabs.createdTabs,
+  requiredTabCount: Object.keys(GOOGLE_SHEET_TABS).length,
+}));
 
 const runId = `phase1-smoke-${Date.now()}`;
 const ids = {
@@ -69,6 +107,7 @@ let testFolder;
 let driveFile;
 
 try {
+  assert.deepEqual(assertPhase1GoogleTargets(), targets);
   const passwordHash = await bcrypt.hash('phase1-test-password', 10);
   await roundTrip(usersRepository, {
     id: ids.user,
@@ -101,6 +140,7 @@ try {
   await roundTrip(siteContentRepository, { id: `${runId}-content`, kind: 'service', key: `${runId}-service`, title: 'Phase 1 Test', payload: { test: true }, published: false }, created);
 
   testFolder = await googleDrive.createFolder({ name: runId, parentId: testDriveRoot, appProperties: { phase1Test: runId } });
+  assert.equal((testFolder.parents || []).includes(testDriveRoot), true);
   driveFile = await googleDrive.uploadFile({ name: 'phase1.txt', parentId: testFolder.id, buffer: Buffer.from('before'), mimeType: 'text/plain', appProperties: { phase1Test: runId } });
   assert.equal((await googleDrive.listFiles({ parentId: testFolder.id })).files.some((file) => file.id === driveFile.id), true);
   await googleDrive.renameFile(driveFile.id, 'phase1-renamed.txt');
@@ -109,10 +149,20 @@ try {
   await googleDrive.deleteFile(driveFile.id);
   driveFile = null;
 
-  console.log(JSON.stringify({ ok: true, runId, checks: ['sheets CRUD', 'bcrypt lookup', 'relationships', 'drive upload/download/replace/delete'] }));
+  console.log(JSON.stringify({
+    ok: true,
+    runId,
+    spreadsheetId: targets.spreadsheetId,
+    driveRootFolderId: targets.driveRootFolderId,
+    checks: [
+      `sheets CRUD (${Object.keys(GOOGLE_SHEET_TABS).length} repositories)`,
+      'bcrypt lookup',
+      'relationships',
+      'drive upload/download/replace/delete',
+    ],
+  }));
 } finally {
   if (driveFile?.id) await googleDrive.deleteFile(driveFile.id).catch(() => {});
   if (testFolder?.id) await googleDrive.deleteFile(testFolder.id).catch(() => {});
   for (const entry of created.reverse()) await entry.repository.delete(entry.id).catch(() => {});
 }
-
