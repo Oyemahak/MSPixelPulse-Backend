@@ -1,6 +1,7 @@
 import { mongoState } from "../config/db.js";
 import { mailerStatus } from "./mailer.js";
 import { storageStatus } from "./supabase.js";
+import { providerStatus } from '../config/providers.js';
 
 export function healthPayload() {
   const storage = storageStatus();
@@ -15,12 +16,8 @@ export function healthPayload() {
       state: mongoState(),
       connected: mongoState() === "connected",
     },
-    supabase: {
-      configured: storage.supabaseConfigured,
-    },
-    storage: {
-      bucketConfigured: storage.storageBucketConfigured,
-    },
+    providers: providerStatus(),
+    storage,
     email,
   };
 }

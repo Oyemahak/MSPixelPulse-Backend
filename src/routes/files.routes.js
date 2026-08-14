@@ -2,10 +2,14 @@
 import { Router } from "express";
 import multer from "multer";
 import { uploadBuffer } from "../lib/supabase.js";
-import { requireAuth } from "../middleware/auth.js";
+import { optionalAuth, requireAuth } from "../middleware/auth.js";
 import Project from "../models/Project.js";
 import { cleanFileName, projectFilePrefix, validateUpload } from "../lib/filePolicy.js";
 import { canReadProject, canWriteProject, projectAccessError } from "../lib/projectAccess.js";
+import { storageProviderName } from '../config/providers.js';
+import { findFileByDriveFileId } from '../repositories/files.repository.js';
+import { getStorageProvider } from '../storage/provider.js';
+import { verifyDriveFileAccess } from '../storage/fileAccessToken.js';
 
 const router = Router();
 
@@ -53,7 +57,15 @@ router.post(
       const clean = cleanFileName(originalname);
       const path = `${projectFilePrefix(projectId, purpose)}${yyyy}/${mm}/${Date.now()}_${clean}`;
 
-      const { url } = await uploadBuffer(path, buffer, mimetype);
+      const { url } = await uploadBuffer(path, buffer, mimetype, {
+        projectId,
+        clientId: String(project.client || ''),
+        userId: String(req.user?._id || ''),
+        uploadedBy: String(req.user?._id || ''),
+        category: purpose,
+        originalName: originalname,
+        isPublic: purpose === 'cover',
+      });
 
       res.json({
         file: {
@@ -69,5 +81,44 @@ router.post(
     }
   }
 );
+
+/**
+ * Google Drive objects stay private. The storage service emits a short-lived
+ * JWT URL compatible with existing <img>/<a> consumers; authenticated users
+ * may also download an object after normal project access is checked.
+ */
+router.get('/files/drive/:driveFileId', optionalAuth, async (req, res, next) => {
+  try {
+    if (storageProviderName() !== 'google-drive') return res.status(404).json({ error: 'File not found' });
+    const record = await findFileByDriveFileId(req.params.driveFileId);
+    if (!record) return res.status(404).json({ error: 'File not found' });
+
+    const signed = verifyDriveFileAccess(req.query?.token, record.driveFileId);
+    const isPublic = record.isPublic === true || record.isPublic === 'true';
+    if (!signed && !isPublic) {
+      if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+      if (req.user.role !== 'admin') {
+        if (record.projectId) {
+          const project = await Project.findById(record.projectId).select('_id client developer').lean();
+          if (!project || !canReadProject(req.user, project)) return projectAccessError(res);
+        } else if (String(record.userId || record.clientId || '') !== String(req.user._id)) {
+          return res.status(403).json({ error: 'Forbidden' });
+        }
+      }
+    }
+
+    const storage = getStorageProvider();
+    const metadata = await storage.getMetadata(record.driveFileId);
+    const stream = await storage.downloadStream(record.driveFileId);
+    res.setHeader('Content-Type', metadata.mimeType || record.mimeType || 'application/octet-stream');
+    const size = metadata.size || record.size;
+    if (size) res.setHeader('Content-Length', String(size));
+    res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(metadata.name || record.originalName || 'download')}`);
+    stream.on('error', next);
+    stream.pipe(res);
+  } catch (error) {
+    next(error);
+  }
+});
 
 export default router;

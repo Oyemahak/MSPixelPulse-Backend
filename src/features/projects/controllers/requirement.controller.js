@@ -108,7 +108,14 @@ export async function upsertRequirement(req, res) {
     if (!one) return null;
     const original = cleanFileName(one.originalname || "file");
     const path = `projects/${projectId}/${keyPath}/${now}_${original}`;
-    const { url } = await uploadBuffer(path, one.buffer, one.mimetype || "application/octet-stream");
+    const { url } = await uploadBuffer(path, one.buffer, one.mimetype || "application/octet-stream", {
+      projectId: String(projectId),
+      clientId: String(targetProject.client || ''),
+      userId: String(me?._id || ''),
+      uploadedBy: String(me?._id || ''),
+      category: 'requirements',
+      originalName: original,
+    });
     return { name: original, type: one.mimetype, size: one.size, path, url };
   }
 

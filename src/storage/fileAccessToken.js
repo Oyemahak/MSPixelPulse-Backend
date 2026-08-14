@@ -1,0 +1,16 @@
+import jwt from 'jsonwebtoken';
+import { jwtSecret } from '../utils/jwt.js';
+
+export function signDriveFileAccess(fileId, expiresInSeconds = 60 * 60 * 24 * 7) {
+  return jwt.sign({ scope: 'drive-file', fileId: String(fileId) }, jwtSecret(), { expiresIn: expiresInSeconds });
+}
+
+export function verifyDriveFileAccess(token, fileId) {
+  try {
+    const payload = jwt.verify(String(token || ''), jwtSecret());
+    return payload?.scope === 'drive-file' && String(payload.fileId) === String(fileId);
+  } catch {
+    return false;
+  }
+}
+

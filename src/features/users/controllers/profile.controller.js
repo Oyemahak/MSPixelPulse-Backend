@@ -115,7 +115,13 @@ export async function setMyAvatar(req, res) {
     const storePath = `avatars/${user._id}/${ts}-${safeName}`;
     const contentType = file.mimetype || 'image/png';
 
-    const uploaded = await uploadBuffer(storePath, file.buffer, contentType);
+    const uploaded = await uploadBuffer(storePath, file.buffer, contentType, {
+      userId: String(user._id),
+      clientId: String(user._id),
+      uploadedBy: String(user._id),
+      category: 'profile',
+      originalName: file.originalname,
+    });
     const oldPath = user.avatarPath;
 
     user.avatarUrl = uploaded.url;

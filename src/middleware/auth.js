@@ -1,8 +1,8 @@
 // backend/src/middleware/auth.js
 import jwt from "jsonwebtoken";
-import User from "../models/User.js";
 import { jwtSecret } from "../utils/jwt.js";
 import { isPortalAccountActive } from "../lib/accountPolicy.js";
+import { usersRepository } from '../repositories/users.repository.js';
 
 function getToken(req) {
   const h = req.headers.authorization;
@@ -20,7 +20,7 @@ export async function requireAuth(req, res, next) {
     const userId = payload.id || payload.sub;
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
-    const user = await User.findById(userId).select("+authVersion");
+    const user = await usersRepository.findById(userId);
     if (
       !isPortalAccountActive(user) ||
       Number(payload.ver || 0) !== Number(user.authVersion || 0)
@@ -42,7 +42,7 @@ export async function optionalAuth(req, _res, next) {
     const payload = jwt.verify(token, jwtSecret());
     const userId = payload.id || payload.sub;
     if (!userId) return next();
-    const user = await User.findById(userId).select("+authVersion");
+    const user = await usersRepository.findById(userId);
     if (
       isPortalAccountActive(user) &&
       Number(payload.ver || 0) === Number(user.authVersion || 0)

@@ -4,10 +4,11 @@ Official MSPixelPulse backend API for authentication, users, agency projects, cl
 
 ## Architecture
 
-- MongoDB Atlas with Mongoose is the primary application database.
+- MongoDB Atlas with Mongoose is the current default application database.
 - Users and authentication data live in MongoDB.
 - Business data such as projects, messages, requirements, invoices, and leads live in MongoDB.
-- Supabase is used for file storage only.
+- Supabase is the current default file-storage provider.
+- Phase 1 adds opt-in Google Sheets repositories and Google Drive storage behind environment-controlled providers; no data migration is included.
 - Render hosts the Express backend.
 - Vercel hosts the React frontend.
 - Authentication is custom JWT auth with Authorization header support and an HTTP-only cookie.
@@ -29,6 +30,9 @@ Official MSPixelPulse backend API for authentication, users, agency projects, cl
 - `src/config/` - environment, CORS, MongoDB helpers
 - `src/features/` - feature controllers and routes
 - `src/models/` - Mongoose schemas
+- `src/google/` - OAuth, Sheets, Drive, and bounded retry utilities
+- `src/repositories/` - provider-neutral domain repositories
+- `src/storage/` - Supabase and Google Drive storage adapters
 - `src/middleware/` - auth, roles, error handling
 - `src/lib/` - Supabase/storage and health helpers
 - `src/scripts/` - seed and maintenance scripts
@@ -70,6 +74,24 @@ SUPABASE_URL=https://PROJECT_REF.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=replace-with-server-secret
 SUPABASE_BUCKET=uploads
 ```
+
+Optional Phase 1 Google provider configuration (defaults preserve the current
+MongoDB/Supabase production path):
+
+```text
+DATA_PROVIDER=mongodb
+STORAGE_PROVIDER=supabase
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+GOOGLE_REFRESH_TOKEN=
+GOOGLE_DATABASE_SPREADSHEET_ID=
+GOOGLE_DRIVE_ROOT_FOLDER_ID=
+GOOGLE_DRIVE_CLIENT_FILES_FOLDER_ID=
+GOOGLE_DRIVE_PROJECT_FILES_FOLDER_ID=
+```
+
+See [`docs/phase1-google-provider.md`](docs/phase1-google-provider.md) for the
+data map, safe smoke-test contract, Vercel limitation, and Phase 2 sequence.
 
 Required for contact and blog notification email:
 
@@ -120,7 +142,7 @@ If Supabase variables are missing, the API still starts, login still works, and 
 
 1. Frontend posts to `POST /api/auth/login`.
 2. Backend normalizes the email with `trim().toLowerCase()`.
-3. User is loaded from MongoDB.
+3. The current default loads the user from MongoDB; controlled Google testing uses the Users repository and `passwordHash` in the Users Sheet.
 4. Password is verified with bcrypt.
 5. Active users receive a JWT.
 6. Frontend stores the token and redirects by role.

@@ -1,11 +1,11 @@
 // backend/src/features/auth/controllers/auth.controller.js
 import jwt from 'jsonwebtoken';
-import User from '../../../models/User.js';
 import { jwtSecret, signToken } from '../../../utils/jwt.js';
 import { boolEnv, isProduction } from '../../../config/env.js';
 import { cleanPublicUrl, cleanText, isValidEmail, normalizeEmail } from '../../../lib/validation.js';
 import { presentUser } from '../../../lib/presentUser.js';
 import { accountAccessState } from '../../../lib/accountPolicy.js';
+import { usersRepository } from '../../../repositories/users.repository.js';
 
 const COOKIE_NAME = 'token';
 const COOKIE_OPTS = {
@@ -48,10 +48,10 @@ export async function register(req, res) {
     return res.status(400).json({ message: 'Business website must be a valid http or https URL' });
   }
 
-  const exists = await User.findOne({ email: normalizedEmail });
+  const exists = await usersRepository.findByEmail(normalizedEmail);
   if (exists) return res.status(409).json({ message: 'Email already in use' });
 
-  const u = await User.create({
+  const user = await usersRepository.create({
     name: safeName,
     email: normalizedEmail,
     password,
@@ -72,7 +72,6 @@ export async function register(req, res) {
     },
   });
 
-  const user = await User.findById(u._id).select('-password');
   res.status(201).json({ user });
 }
 
@@ -85,11 +84,8 @@ export async function login(req, res) {
       return res.status(400).json({ message: 'Email and password are required' });
     }
 
-    const user = await User.findOne({ email: normalizedEmail }).select('+password +authVersion');
+    const user = await usersRepository.verifyCredentials(normalizedEmail, password);
     if (!user) return res.status(401).json({ message: 'Invalid credentials' });
-
-    const ok = await user.comparePassword(password);
-    if (!ok) return res.status(401).json({ message: 'Invalid credentials' });
 
     if (!accountAccessState(user).allowed) {
       return res.status(403).json({ message: 'Account is not active. Please contact an administrator.' });
@@ -98,7 +94,7 @@ export async function login(req, res) {
     const token = signToken(user);
     res.cookie(COOKIE_NAME, token, COOKIE_OPTS);
 
-    const safe = await presentUser(await User.findById(user._id).select('-password'));
+    const safe = await presentUser(await usersRepository.findById(user._id));
     return res.json({ token, user: safe });
   } catch (err) {
     console.error('Login error:', err.code || 'LOGIN_FAILURE');
@@ -118,7 +114,7 @@ export async function me(req, res) {
     const token = getToken(req);
     if (!token) return res.status(401).json({ message: 'Unauthorized' });
     const payload = jwt.verify(token, jwtSecret());
-    const user = await User.findById(payload.id || payload.sub).select('+authVersion');
+    const user = await usersRepository.findById(payload.id || payload.sub);
     if (
       !accountAccessState(user).allowed ||
       Number(payload.ver || 0) !== Number(user.authVersion || 0)
