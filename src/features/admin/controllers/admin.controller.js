@@ -1,11 +1,10 @@
 // src/features/admin/controllers/admin.controller.js
 import User from '../../../models/User.js';
 import Project from '../../../models/Project.js';
-import Invoice from '../../../models/Invoice.js';
-import Message from '../../../models/Message.js';
-import Thread from '../../../models/Thread.js';
 import Lead from '../../../models/Lead.js';
 import { cleanText, isValidEmail } from '../../../lib/validation.js';
+import { activeAccountPatch } from '../../../lib/accountPolicy.js';
+import { deleteUserPermanently } from '../../../lib/deleteUserPermanently.js';
 
 const ADMIN_ONLY_FIELDS = ['isSuperAdmin', 'isProtected', 'accountStatus', 'protectedReason'];
 const PROTECTED_MUTATION_FIELDS = ['role', 'status', 'email', 'password', ...ADMIN_ONLY_FIELDS];
@@ -86,7 +85,19 @@ export async function listPending(_req, res) {
 export async function getUser(req, res) {
   const user = await User.findById(req.params.userId).select('-password');
   if (!user) return res.status(404).json({ message: 'User not found' });
-  res.json({ user });
+  const assignedProjects = await Project.find({
+    $or: [{ client: user._id }, { developer: user._id }],
+  })
+    .select('_id title status client developer createdAt updatedAt')
+    .sort({ updatedAt: -1 })
+    .lean();
+  res.json({
+    user: {
+      ...user.toObject(),
+      passwordConfigured: true,
+      assignedProjects,
+    },
+  });
 }
 
 export async function createUser(req, res) {
@@ -110,6 +121,13 @@ export async function createUser(req, res) {
     role,
     status,
     accountStatus: status,
+    accessApplication: {
+      status: status === 'active' && role === 'client' ? 'approved' : 'pending',
+      requestedRole: 'client',
+      submittedAt: new Date(),
+      decidedAt: status === 'active' && role === 'client' ? new Date() : null,
+      decidedBy: status === 'active' && role === 'client' ? req.user._id : null,
+    },
   });
   const user = await User.findById(u._id).select('-password');
   res.status(201).json({ user });
@@ -122,7 +140,6 @@ export async function updateUser(req, res) {
     'role',
     'status',
     'email',
-    'password',
     'phone',
     'companyName',
     'businessName',
@@ -143,7 +160,7 @@ export async function updateUser(req, res) {
   const patch = {};
   for (const k of allowed) if (k in req.body) patch[k] = req.body[k];
 
-  const user = await User.findById(userId).select('+password');
+  const user = await User.findById(userId);
   if (!user) return res.status(404).json({ message: 'User not found' });
 
   if (hasForbiddenField(req.body, ADMIN_ONLY_FIELDS)) {
@@ -154,9 +171,6 @@ export async function updateUser(req, res) {
   if (patch.email) {
     patch.email = normalizeEmail(patch.email);
     if (!isValidEmail(patch.email)) return res.status(400).json({ message: 'A valid email is required' });
-  }
-  if ('password' in patch && (typeof patch.password !== 'string' || patch.password.length < 8 || patch.password.length > 72)) {
-    return res.status(400).json({ message: 'Password must be 8-72 characters' });
   }
   if (patch.role && !VALID_ROLES.includes(patch.role)) {
     return res.status(400).json({ message: 'Invalid role' });
@@ -172,8 +186,22 @@ export async function updateUser(req, res) {
     }
   }
 
-  if (patch.status) patch.accountStatus = patch.status;
+  const requestedStatus = patch.status;
+  delete patch.status;
   Object.assign(user, patch);
+  if (requestedStatus === 'active') {
+    Object.assign(user, activeAccountPatch(user, req.user._id));
+  } else if (requestedStatus) {
+    user.status = requestedStatus;
+    user.accountStatus = requestedStatus;
+    if (requestedStatus === 'pending' && user.role === 'client') {
+      user.accessApplication = {
+        ...(user.accessApplication?.toObject?.() || user.accessApplication || {}),
+        status: 'pending',
+        requestedRole: 'client',
+      };
+    }
+  }
   await user.save();
 
   const safe = await User.findById(userId).select('-password');
@@ -187,34 +215,39 @@ export async function deleteUser(req, res) {
   if (isProtectedAccount(user)) {
     return res.status(403).json({ message: 'Protected super admin account cannot be deleted' });
   }
-  const [projectCount, invoiceCount, messageCount, threadCount] = await Promise.all([
-    Project.countDocuments({ $or: [{ client: userId }, { developer: userId }] }),
-    Invoice.countDocuments({ $or: [{ client: userId }, { uploadedBy: userId }] }),
-    Message.countDocuments({ author: userId }),
-    Thread.countDocuments({ participants: userId }),
-  ]);
-  if (projectCount || invoiceCount || messageCount || threadCount) {
-    return res.status(409).json({
-      message: 'This account has related workspace history. Suspend it instead of deleting it.',
-    });
+  const result = await deleteUserPermanently(user);
+  res.json({ ok: true, ...result });
+}
+
+export async function setUserPassword(req, res) {
+  const { userId } = req.params;
+  const password = req.body?.password;
+  if (typeof password !== 'string' || password.length < 8 || password.length > 72) {
+    return res.status(400).json({ message: 'Password must be 8-72 characters' });
   }
-  await user.deleteOne();
-  res.json({ ok: true });
+
+  const user = await User.findById(userId).select('+password +authVersion');
+  if (!user) return res.status(404).json({ message: 'User not found' });
+  if (isProtectedAccount(user) && String(user._id) !== String(req.user._id)) {
+    return res.status(403).json({ message: 'Protected super admin credentials cannot be changed here' });
+  }
+
+  user.password = password;
+  user.authVersion = Number(user.authVersion || 0) + 1;
+  await user.save();
+
+  res.json({
+    ok: true,
+    passwordChangedAt: user.passwordChangedAt,
+    sessionsInvalidated: true,
+  });
 }
 
 export async function approveUser(req, res) {
   const { userId } = req.params;
   const user = await User.findById(userId).select('-password');
   if (!user) return res.status(404).json({ message: 'User not found' });
-  user.status = 'active';
-  user.accountStatus = 'active';
-  user.accessApplication = {
-    ...(user.accessApplication?.toObject?.() || user.accessApplication || {}),
-    status: 'approved',
-    requestedRole: 'client',
-    decidedAt: new Date(),
-    decidedBy: req.user._id,
-  };
+  Object.assign(user, activeAccountPatch(user, req.user._id));
   await user.save();
   res.json({ user });
 }
@@ -255,6 +288,9 @@ export async function updateRole(req, res) {
     return res.status(403).json({ message: 'Protected super admin account cannot be demoted' });
   }
   user.role = role;
+  if (role === 'client' && user.status === 'active') {
+    Object.assign(user, activeAccountPatch(user, req.user._id));
+  }
   await user.save();
   res.json({ user });
 }

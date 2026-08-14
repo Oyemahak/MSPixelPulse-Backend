@@ -28,6 +28,7 @@ import userProfileRoutes from "../features/users/routes/index.js";
 import leadRoutes from "../features/leads/routes/index.js";
 import blogEngagementRoutes from "../features/blogEngagement/routes/index.js";
 import contentRoutes from "./content.js";
+import supportRoutes from "../features/support/routes/index.js";
 
 const router = Router();
 
@@ -61,6 +62,7 @@ router.use("/users", userProfileRoutes);
 router.use("/contact", leadRoutes);
 router.use("/blog-engagement", blogEngagementRoutes);
 router.use("/content", contentRoutes);
+router.use("/support", supportRoutes);
 
 // Debug maintenance routes are disabled unless ENABLE_DEBUG_ROUTES=true.
 router.use("/debug", debugRoutes);

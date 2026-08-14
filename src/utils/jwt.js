@@ -14,9 +14,12 @@ export function jwtSecret() {
 }
 
 export function signToken(user) {
-  // Use id (to match your original controller)
   return jwt.sign(
-    { id: user._id.toString(), role: user.role },
+    {
+      id: user._id.toString(),
+      role: user.role,
+      ver: Number(user.authVersion || 0),
+    },
     jwtSecret(),
     { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
   );

@@ -1,8 +1,15 @@
 // backend/src/features/projects/controllers/project.controller.js
 import Project from '../../../models/Project.js';
+import Requirement from '../../../models/Requirement.js';
 import { cleanPublicUrl, cleanText } from '../../../lib/validation.js';
 import { createSignedUrl, removePath } from '../../../lib/supabase.js';
 import { pathBelongsToProjectPurpose } from '../../../lib/filePolicy.js';
+import {
+  canReadProject,
+  canWriteProject,
+  projectAccessError,
+  projectScopeFor,
+} from '../../../lib/projectAccess.js';
 
 /* Populate user refs consistently */
 const POP = [
@@ -53,26 +60,6 @@ const PUBLIC_SELECT = [
   'summary',
   ...PORTFOLIO_FIELDS,
 ].join(' ');
-
-function canReadProject(user, project) {
-  if (!user || !project) return false;
-  if (user.role === 'admin') return true;
-  if (String(project.client || '') === String(user._id)) return true;
-  if (String(project.developer || '') === String(user._id)) return true;
-  return false;
-}
-
-function canWriteProject(user, project) {
-  if (!user || !project) return false;
-  if (user.role === 'admin') return true;
-  return user.role === 'developer' && String(project.developer || '') === String(user._id);
-}
-
-function projectScopeFor(user) {
-  if (!user || user.role === 'admin') return {};
-  if (user.role === 'developer') return { developer: user._id };
-  return { client: user._id };
-}
 
 function parseBool(value) {
   if (value === undefined || value === null || value === '') return undefined;
@@ -180,7 +167,23 @@ export async function listProjects(req, res) {
   }
 
   const rows = await Project.find(cond).sort(sortSpec(sort)).populate(POP);
-  const projects = await Promise.all(rows.map(presentProject));
+  const requirementRows = rows.length
+    ? await Requirement.find({ project: { $in: rows.map((row) => row._id) } })
+      .select('project updatedAt')
+      .lean()
+    : [];
+  const requirementMap = new Map(
+    requirementRows.map((requirement) => [String(requirement.project), requirement.updatedAt])
+  );
+  const projects = await Promise.all(rows.map(async (row) => {
+    const project = await presentProject(row);
+    const requirementsUpdatedAt = requirementMap.get(String(row._id)) || null;
+    return {
+      ...project,
+      hasRequirements: Boolean(requirementsUpdatedAt),
+      requirementsUpdatedAt,
+    };
+  }));
   res.json({ projects, total: projects.length });
 }
 
@@ -228,7 +231,7 @@ export async function getProject(req, res) {
   const { projectId } = req.params;
   const project = await Project.findById(projectId).populate(POP);
   if (!project) return res.status(404).json({ message: 'Project not found' });
-  if (!canReadProject(req.user, project)) return res.status(403).json({ message: 'Forbidden' });
+  if (!canReadProject(req.user, project)) return projectAccessError(res);
   res.json({ project: await presentProject(project) });
 }
 
@@ -280,7 +283,7 @@ export async function updateProject(req, res) {
   const isAssignedDev = req.user?.role === 'developer' && canWriteProject(req.user, project);
 
   if (!isAdmin && !isAssignedDev) {
-    return res.status(403).json({ message: 'Forbidden' });
+    return projectAccessError(res);
   }
 
   const validationError = portfolioValidationError({ ...(req.body || {}), projectId });
@@ -310,7 +313,7 @@ export async function updateProject(req, res) {
     const keys = Object.keys(req.body || {});
     const illegal = keys.filter((k) => !devAllowed.includes(k));
     if (illegal.length) {
-      return res.status(403).json({ message: 'Forbidden' });
+      return projectAccessError(res);
     }
   }
 
@@ -411,13 +414,13 @@ export async function addEvidence(req, res) {
   const me = req.user;
 
   if (!['admin', 'developer'].includes(me.role)) {
-    return res.status(403).json({ message: 'Forbidden' });
+    return projectAccessError(res);
   }
 
   const { title = 'Update', links = [], images = [] } = req.body || {};
   const project = await Project.findById(projectId);
   if (!project) return res.status(404).json({ message: 'Project not found' });
-  if (!canWriteProject(me, project)) return res.status(403).json({ message: 'Forbidden' });
+  if (!canWriteProject(me, project)) return projectAccessError(res);
 
   const cleanImages = Array.isArray(images) ? images.slice(0, 20) : [];
   if (cleanImages.some((image) => !image?.path || !pathBelongsToProjectPurpose(image.path, projectId, 'evidence'))) {
@@ -448,7 +451,7 @@ export async function listAnnouncements(req, res) {
   const { projectId } = req.params;
   const project = await Project.findById(projectId).select('announcements client developer').lean();
   if (!project) return res.status(404).json({ message: 'Project not found' });
-  if (!canReadProject(req.user, project)) return res.status(403).json({ message: 'Forbidden' });
+  if (!canReadProject(req.user, project)) return projectAccessError(res);
   const items = [...(project.announcements || [])].sort((a, b) => (b.ts || 0) - (a.ts || 0));
   res.json({ ok: true, items });
 }
@@ -459,7 +462,7 @@ export async function createAnnouncement(req, res) {
   const me = req.user;
 
   if (!['admin', 'developer'].includes(me.role)) {
-    return res.status(403).json({ message: 'Forbidden' });
+    return projectAccessError(res);
   }
 
   const { title = '', body = '' } = req.body || {};
@@ -467,7 +470,7 @@ export async function createAnnouncement(req, res) {
 
   const project = await Project.findById(projectId);
   if (!project) return res.status(404).json({ message: 'Project not found' });
-  if (!canWriteProject(me, project)) return res.status(403).json({ message: 'Forbidden' });
+  if (!canWriteProject(me, project)) return projectAccessError(res);
 
   const entry = { title: title.trim(), body: String(body || ''), ts: Date.now(), author: me._id };
   project.announcements.unshift(entry);

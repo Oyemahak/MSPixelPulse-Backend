@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { requireAuth, requireRole } from '../../../middleware/auth.js';
 import {
   listUsers, listPending, getUser, updateUser, deleteUser,
-  approveUser, rejectUser, updateRole, createUser,
+  approveUser, rejectUser, updateRole, createUser, setUserPassword,
   listLeads, updateLead, archiveLead
 } from '../controllers/admin.controller.js';
 import blogEngagementAdminRoutes from '../../blogEngagement/routes/admin.js';
@@ -17,6 +17,7 @@ router.get('/users/pending', listPending);
 router.get('/users/:userId', getUser);
 router.post('/users', createUser);
 router.patch('/users/:userId', updateUser);
+router.patch('/users/:userId/password', setUserPassword);
 router.delete('/users/:userId', deleteUser);
 
 // Approvals

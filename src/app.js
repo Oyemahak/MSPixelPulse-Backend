@@ -38,6 +38,7 @@ const authLimiter = rateLimit({
   limit: 60,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
+  skip: (req) => req.path === '/me' || req.path === '/logout',
   message: { message: 'Too many authentication requests. Please try again later.' },
 });
 app.use('/api/auth', authLimiter);

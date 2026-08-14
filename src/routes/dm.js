@@ -101,6 +101,8 @@ router.post("/threads/:id/messages", async (req, res) => {
     kind: "dm",
     thread: thread._id,
     author: me._id,
+    authorNameAtSend: me.name || '',
+    authorEmailAtSend: me.email || '',
     authorRoleAtSend: me.role,
     text: body.text,
     attachments: body.attachments,

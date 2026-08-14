@@ -33,6 +33,19 @@ const PURPOSES = {
     ]),
     extensions: new Set(['.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png', '.webp']),
   },
+  message: {
+    maxBytes: 15 * 1024 * 1024,
+    mimeTypes: new Set([
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'text/plain',
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+    ]),
+    extensions: new Set(['.pdf', '.doc', '.docx', '.txt', '.jpg', '.jpeg', '.png', '.webp']),
+  },
 };
 
 export function cleanFileName(value = 'file') {

@@ -25,6 +25,7 @@ const PROFILE_FIELDS = [
   'availability',
   'projectContactPreference',
   'notificationPreferences',
+  'themePreference',
 ];
 
 function cleanList(value) {
@@ -55,6 +56,11 @@ function cleanProfilePatch(body = {}) {
         emailUpdates: prefs.emailUpdates !== false,
         billingAlerts: prefs.billingAlerts !== false,
       };
+      continue;
+    }
+
+    if (key === 'themePreference') {
+      if (['light', 'dark'].includes(body[key])) patch[key] = body[key];
       continue;
     }
 

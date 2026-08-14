@@ -2,6 +2,7 @@
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
 import { jwtSecret } from "../utils/jwt.js";
+import { isPortalAccountActive } from "../lib/accountPolicy.js";
 
 function getToken(req) {
   const h = req.headers.authorization;
@@ -19,8 +20,11 @@ export async function requireAuth(req, res, next) {
     const userId = payload.id || payload.sub;
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
-    const user = await User.findById(userId).select("-password");
-    if (!user || user.status !== "active" || user.accountStatus === "suspended") {
+    const user = await User.findById(userId).select("+authVersion");
+    if (
+      !isPortalAccountActive(user) ||
+      Number(payload.ver || 0) !== Number(user.authVersion || 0)
+    ) {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
@@ -38,8 +42,11 @@ export async function optionalAuth(req, _res, next) {
     const payload = jwt.verify(token, jwtSecret());
     const userId = payload.id || payload.sub;
     if (!userId) return next();
-    const user = await User.findById(userId).select("-password");
-    if (user?.status === "active" && user.accountStatus !== "suspended") req.user = user;
+    const user = await User.findById(userId).select("+authVersion");
+    if (
+      isPortalAccountActive(user) &&
+      Number(payload.ver || 0) === Number(user.authVersion || 0)
+    ) req.user = user;
   } catch {
     // Public engagement remains available when an optional token is absent or stale.
   }

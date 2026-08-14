@@ -6,7 +6,9 @@ const UserSchema = new mongoose.Schema(
   {
     name: { type: String, trim: true },
     email: { type: String, unique: true, required: true, lowercase: true, trim: true },
-    password: { type: String, required: true, select: true },
+    password: { type: String, required: true, select: false },
+    passwordChangedAt: { type: Date, default: null },
+    authVersion: { type: Number, default: 0, min: 0, select: false },
     role: { type: String, enum: ['admin', 'developer', 'client'], default: 'client' },
     status: { type: String, enum: ['pending', 'active', 'suspended'], default: 'pending' },
     accountStatus: { type: String, enum: ['pending', 'active', 'suspended'], default: 'pending' },
@@ -48,6 +50,7 @@ const UserSchema = new mongoose.Schema(
       emailUpdates: { type: Boolean, default: true },
       billingAlerts: { type: Boolean, default: true },
     },
+    themePreference: { type: String, enum: ['light', 'dark'], default: 'dark' },
   },
   { timestamps: true }
 );
@@ -55,6 +58,7 @@ const UserSchema = new mongoose.Schema(
 UserSchema.pre('save', async function (next) {
   if (!this.isModified('password')) return next();
   this.password = await bcrypt.hash(this.password, 10);
+  this.passwordChangedAt = new Date();
   next();
 });
 

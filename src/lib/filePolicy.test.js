@@ -13,6 +13,11 @@ test('cover policy accepts images only', () => {
   assert.equal(validateUpload({ originalname: 'cover.pdf', mimetype: 'application/pdf', size: 2048 }, 'cover').ok, false);
 });
 
+test('message policy accepts safe project-room attachments', () => {
+  assert.equal(validateUpload({ originalname: 'notes.txt', mimetype: 'text/plain', size: 120 }, 'message').ok, true);
+  assert.equal(validateUpload({ originalname: 'payload.js', mimetype: 'text/javascript', size: 120 }, 'message').ok, false);
+});
+
 test('storage ownership is scoped to the project and purpose', () => {
   assert.equal(pathBelongsToProjectPurpose('projects/abc/invoices/one.pdf', 'abc', 'invoice'), true);
   assert.equal(pathBelongsToProjectPurpose('projects/other/invoices/one.pdf', 'abc', 'invoice'), false);

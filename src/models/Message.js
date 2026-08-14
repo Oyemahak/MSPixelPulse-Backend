@@ -24,7 +24,10 @@ const MessageSchema = new Schema(
     room: { type: Types.ObjectId, ref: 'Room', index: true },
     project: { type: Types.ObjectId, ref: 'Project', index: true },
 
-    author: { type: Types.ObjectId, ref: 'User', required: true, index: true },
+    author: { type: Types.ObjectId, ref: 'User', default: null, index: true },
+    authorNameAtSend: { type: String, trim: true, default: '' },
+    authorEmailAtSend: { type: String, trim: true, lowercase: true, default: '', select: false },
+    authorDeleted: { type: Boolean, default: false },
     authorRoleAtSend: { type: String, enum: ['admin', 'developer', 'client'], required: true },
 
     text: { type: String, default: '' },

@@ -4,15 +4,10 @@ import Project from "../../../models/Project.js";
 import { createSignedUrl, removePath } from "../../../lib/supabase.js";
 import { pathBelongsToProjectPurpose } from "../../../lib/filePolicy.js";
 import { cleanText } from "../../../lib/validation.js";
+import { canReadProject, projectAccessError } from "../../../lib/projectAccess.js";
 
 const VALID_STATUSES = ["draft", "sent", "uploaded", "paid", "archived"];
 
-function canRead(user, project) {
-  if (!user || !project) return false;
-  if (String(project.client) === String(user._id)) return true;
-  if (String(project.developer) === String(user._id)) return true;
-  return user.role === "admin";
-}
 function canWrite(user, project) {
   if (!user || !project) return false;
   return user.role === "admin";
@@ -88,7 +83,7 @@ export async function listInvoices(req, res, next) {
     const { projectId } = req.params;
     const project = await Project.findById(projectId).lean();
     if (!project) return res.status(404).json({ error: "Project not found" });
-    if (!canRead(req.user, project)) return res.status(403).json({ error: "Forbidden" });
+    if (!canReadProject(req.user, project)) return projectAccessError(res);
     const filter = { project: projectId, status: { $ne: "archived" } };
     const rows = await Invoice.find(filter).sort({ createdAt: -1 }).lean();
     await Promise.all(rows.map(freshInvoiceFile));
@@ -104,7 +99,7 @@ export async function createInvoice(req, res, next) {
     const { projectId } = req.params;
     const project = await Project.findById(projectId).lean();
     if (!project) return res.status(404).json({ error: "Project not found" });
-    if (!canWrite(req.user, project)) return res.status(403).json({ error: "Forbidden" });
+    if (!canWrite(req.user, project)) return projectAccessError(res);
 
     const body = req.body || {};
     const file = body.file;

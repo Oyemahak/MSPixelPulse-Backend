@@ -5,6 +5,7 @@ import { jwtSecret, signToken } from '../../../utils/jwt.js';
 import { boolEnv, isProduction } from '../../../config/env.js';
 import { cleanPublicUrl, cleanText, isValidEmail, normalizeEmail } from '../../../lib/validation.js';
 import { presentUser } from '../../../lib/presentUser.js';
+import { accountAccessState } from '../../../lib/accountPolicy.js';
 
 const COOKIE_NAME = 'token';
 const COOKIE_OPTS = {
@@ -84,13 +85,13 @@ export async function login(req, res) {
       return res.status(400).json({ message: 'Email and password are required' });
     }
 
-    const user = await User.findOne({ email: normalizedEmail }).select('+password');
+    const user = await User.findOne({ email: normalizedEmail }).select('+password +authVersion');
     if (!user) return res.status(401).json({ message: 'Invalid credentials' });
 
     const ok = await user.comparePassword(password);
     if (!ok) return res.status(401).json({ message: 'Invalid credentials' });
 
-    if (user.status !== 'active') {
+    if (!accountAccessState(user).allowed) {
       return res.status(403).json({ message: 'Account is not active. Please contact an administrator.' });
     }
 
@@ -117,8 +118,11 @@ export async function me(req, res) {
     const token = getToken(req);
     if (!token) return res.status(401).json({ message: 'Unauthorized' });
     const payload = jwt.verify(token, jwtSecret());
-    const user = await User.findById(payload.id).select('-password');
-    if (!user || user.status !== 'active' || user.accountStatus === 'suspended') {
+    const user = await User.findById(payload.id || payload.sub).select('+authVersion');
+    if (
+      !accountAccessState(user).allowed ||
+      Number(payload.ver || 0) !== Number(user.authVersion || 0)
+    ) {
       return res.status(401).json({ message: 'Unauthorized' });
     }
     res.json({ user: await presentUser(user) });

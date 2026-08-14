@@ -12,6 +12,8 @@ import Room from './models/Room.js';
 import Thread from './models/Thread.js';
 import { jwtSecret } from './utils/jwt.js';
 import { corsOptions } from './config/cors.js';
+import { canReadProject } from './lib/projectAccess.js';
+import { isPortalAccountActive } from './lib/accountPolicy.js';
 
 const PORT = process.env.PORT || 4000;
 
@@ -30,8 +32,12 @@ async function boot() {
       const token = socket.handshake.auth?.token || (authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '');
       if (!token) return next(new Error('unauthorized'));
       const payload = jwt.verify(token, jwtSecret());
-      const user = await User.findById(payload.id || payload.sub).select('_id role status accountStatus');
-      if (!user || user.status !== 'active' || user.accountStatus === 'suspended') {
+      const user = await User.findById(payload.id || payload.sub)
+        .select('_id name email role status accountStatus accessApplication +authVersion');
+      if (
+        !isPortalAccountActive(user) ||
+        Number(payload.ver || 0) !== Number(user.authVersion || 0)
+      ) {
         return next(new Error('unauthorized'));
       }
       socket.user = user;
@@ -45,13 +51,9 @@ async function boot() {
     socket.on('room:join', async (projectId, done = () => {}) => {
       try {
         const project = await Project.findById(projectId).select('_id client developer').lean();
-        const me = String(socket.user._id);
-        const allowed = project && (
-          socket.user.role === 'admin' ||
-          (socket.user.role === 'developer' && String(project.developer || '') === me) ||
-          (socket.user.role === 'client' && String(project.client || '') === me)
-        );
-        if (!allowed) return done({ ok: false, error: 'forbidden' });
+        if (!canReadProject(socket.user, project)) {
+          return done({ ok: false, error: "You don't have access to this project." });
+        }
         const room = await Room.findOne({ project: project._id }).select('_id').lean();
         if (!room) return done({ ok: false, error: 'room not found' });
         socket.join(`room:${room._id}`);

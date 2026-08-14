@@ -6,7 +6,7 @@
   "type": "module",
   "private": true,
   "engines": {
-    "node": ">=18"
+    "node": "22.x"
   },
   "scripts": {
     "dev": "node --env-file=.env src/server.js",
@@ -21,7 +21,12 @@
     "seed:content": "node src/scripts/seedContent.js",
     "cleanup:dummy:dry": "node src/scripts/cleanupDummy.js",
     "cleanup:dummy": "node src/scripts/cleanupDummy.js --confirm",
-    "cleanup:storage:dry": "node src/scripts/storageCleanupDryRun.js"
+    "cleanup:storage:dry": "node src/scripts/storageCleanupDryRun.js",
+    "normalize:portal:dry": "node --env-file=.env src/scripts/normalizePortalAccounts.js",
+    "normalize:portal": "node --env-file=.env src/scripts/normalizePortalAccounts.js --confirm",
+    "verify:user-deletion": "node --env-file=.env src/scripts/verifyUserDeletionCascade.js",
+    "fixture:portal-e2e": "node --env-file=.env src/scripts/portalE2EFixture.js",
+    "fixture:portal-e2e:cleanup": "node --env-file=.env src/scripts/portalE2EFixture.js --cleanup"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.75.1",

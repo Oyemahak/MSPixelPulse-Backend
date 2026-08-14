@@ -5,6 +5,7 @@ import { uploadBuffer } from "../lib/supabase.js";
 import { requireAuth } from "../middleware/auth.js";
 import Project from "../models/Project.js";
 import { cleanFileName, projectFilePrefix, validateUpload } from "../lib/filePolicy.js";
+import { canReadProject, canWriteProject, projectAccessError } from "../lib/projectAccess.js";
 
 const router = Router();
 
@@ -25,19 +26,19 @@ router.post(
 
       const purpose = String(req.body?.purpose || "");
       const projectId = String(req.body?.projectId || "");
-      if (!['invoice', 'evidence', 'cover'].includes(purpose) || !projectId) {
+      if (!['invoice', 'evidence', 'cover', 'message'].includes(purpose) || !projectId) {
         return res.status(400).json({ error: 'purpose and projectId are required' });
       }
 
-      const project = await Project.findById(projectId).select('_id developer').lean();
+      const project = await Project.findById(projectId).select('_id client developer').lean();
       if (!project) return res.status(404).json({ error: 'Project not found' });
       const isAdmin = req.user?.role === 'admin';
-      const isAssignedDeveloper = req.user?.role === 'developer' && String(project.developer || '') === String(req.user._id);
       if (
         (['invoice', 'cover'].includes(purpose) && !isAdmin) ||
-        (purpose === 'evidence' && !isAdmin && !isAssignedDeveloper)
+        (purpose === 'evidence' && !canWriteProject(req.user, project)) ||
+        (purpose === 'message' && !canReadProject(req.user, project))
       ) {
-        return res.status(403).json({ error: 'Forbidden' });
+        return projectAccessError(res);
       }
 
       const verdict = validateUpload(req.file, purpose);

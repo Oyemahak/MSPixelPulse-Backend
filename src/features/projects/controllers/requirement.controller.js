@@ -5,21 +5,11 @@ import Project from "../../../models/Project.js";
 import { createSignedUrl, removePaths, uploadBuffer } from "../../../lib/supabase.js";
 import { cleanFileName, validateUpload } from "../../../lib/filePolicy.js";
 import { cleanText } from "../../../lib/validation.js";
-
-function canRead(user, project) {
-  if (!user || !project) return false;
-  if (user.role === "admin") return true;
-  if (String(project.client || "") === String(user._id)) return true;
-  if (String(project.developer || "") === String(user._id)) return true;
-  return false;
-}
-
-function canWrite(user, project) {
-  if (!user || !project) return false;
-  if (user.role === "admin") return true;
-  if (user.role === "developer") return String(project.developer || "") === String(user._id);
-  return user.role === "client" && String(project.client || "") === String(user._id);
-}
+import {
+  canManageRequirements,
+  canReadProject,
+  projectAccessError,
+} from "../../../lib/projectAccess.js";
 
 /**
  * Multer keeps files in memory so we can stream to Supabase.
@@ -67,7 +57,7 @@ export async function getRequirement(req, res) {
   const { projectId } = req.params;
   const project = await Project.findById(projectId).select("client developer").lean();
   if (!project) return res.status(404).json({ message: "Project not found" });
-  if (!canRead(req.user, project)) return res.status(403).json({ message: "Forbidden" });
+  if (!canReadProject(req.user, project)) return projectAccessError(res);
   const doc = await Requirement.findOne({ project: projectId }).lean();
   res.json({ ok: true, requirement: await presentRequirement(doc) });
 }
@@ -96,7 +86,7 @@ export async function upsertRequirement(req, res) {
   const now = Date.now();
   const targetProject = await Project.findById(projectId).select("client developer").lean();
   if (!targetProject) return res.status(404).json({ message: "Project not found" });
-  if (!canWrite(me, targetProject)) return res.status(403).json({ message: "Forbidden" });
+  if (!canManageRequirements(me, targetProject)) return projectAccessError(res);
 
   for (const file of Array.isArray(req.files) ? req.files : Object.values(req.files || {}).flat()) {
     const verdict = validateUpload(file, 'requirement');
@@ -243,7 +233,7 @@ export async function setReview(req, res) {
   const { reviewed = true } = req.body || {};
   const project = await Project.findById(projectId).select("client developer").lean();
   if (!project) return res.status(404).json({ message: "Project not found" });
-  if (!canRead(req.user, project)) return res.status(403).json({ message: "Forbidden" });
+  if (!canReadProject(req.user, project)) return projectAccessError(res);
   const doc = await Requirement.findOneAndUpdate(
     { project: projectId },
     { $set: { reviewedByDev: !!reviewed, reviewedAt: reviewed ? new Date() : null } },
