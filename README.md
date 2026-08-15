@@ -1,4 +1,4 @@
-# MSPixelPulse Backend
+# MSPixelPulse Web Solutions Backend
 
 Official MSPixelPulse backend API for authentication, users, agency projects, client workspaces, messaging, billing, portfolio content, and secure file workflows.
 
