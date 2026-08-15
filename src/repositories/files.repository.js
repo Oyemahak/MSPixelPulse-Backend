@@ -1,21 +1,53 @@
-import File from '../models/File.js';
-import { dataProviderName } from '../config/providers.js';
-import { GOOGLE_SHEET_TABS, GoogleSheetsRepository } from '../google/sheets.js';
-import { createEntityRepository } from './entity.repository.js';
+// src/repositories/files.repository.js
 
-export const filesRepository = createEntityRepository({
-  tab: GOOGLE_SHEET_TABS.files,
-  model: File,
-  aliases: { projectId: 'project', userId: 'uploader' },
-});
+import {
+  GOOGLE_SHEET_TABS,
+  GoogleSheetsRepository,
+} from '../google/sheets.js';
 
-/** Files are also used by Google Drive when Mongo remains the data provider. */
-export const googleFilesRepository = new GoogleSheetsRepository(GOOGLE_SHEET_TABS.files);
+import {
+  createEntityRepository,
+} from './entity.repository.js';
 
-export async function findFileByDriveFileId(driveFileId) {
-  const provider = dataProviderName() === 'google' ? filesRepository : googleFilesRepository;
-  return provider.findOne({ driveFileId: String(driveFileId) });
+/**
+ * Application-facing Files repository.
+ *
+ * Google Sheets is the only production database provider.
+ * Stable application IDs are used instead of spreadsheet row numbers.
+ */
+export const filesRepository =
+  createEntityRepository({
+    tab: GOOGLE_SHEET_TABS.files,
+  });
+
+/**
+ * Google Drive storage needs direct access to the Files sheet for
+ * logical-path -> Drive-file metadata resolution.
+ *
+ * Keep this export because GoogleDriveStorage already consumes it.
+ */
+export const googleFilesRepository =
+  new GoogleSheetsRepository(
+    GOOGLE_SHEET_TABS.files,
+  );
+
+/**
+ * Resolve a stored file using its Google Drive file ID.
+ */
+export async function findFileByDriveFileId(
+  driveFileId,
+) {
+  const id = String(
+    driveFileId || '',
+  ).trim();
+
+  if (!id) {
+    return null;
+  }
+
+  return googleFilesRepository.findOne({
+    driveFileId: id,
+  });
 }
 
 export default filesRepository;
-

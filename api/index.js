@@ -1,17 +1,45 @@
-import app from '../src/app.js';
-import connectDB from '../src/config/db.js';
-import { dataProviderName } from '../src/config/providers.js';
+// api/index.js
 
-let databaseReady;
+import app from '../src/app.js';
+
+import {
+  dataProviderName,
+  storageProviderName,
+} from '../src/config/providers.js';
 
 /**
- * Vercel-compatible Express entrypoint. This handler intentionally has no
- * listen() call; persistent Socket.IO is not part of the Vercel API runtime.
+ * Vercel-compatible Express entrypoint.
+ *
+ * Production persistence:
+ * - Google Sheets = application database
+ * - Google Drive = file storage
+ *
+ * There is intentionally no database connection bootstrap here.
+ * Google APIs are initialized lazily by their repositories/providers.
+ *
+ * Socket.IO is handled only by src/server.js for environments that
+ * support persistent HTTP connections. Vercel Functions use this
+ * stateless Express entrypoint.
  */
 export default async function handler(req, res) {
-  if (dataProviderName() === 'mongodb') {
-    databaseReady ||= connectDB();
-    await databaseReady;
+  /*
+   * Fail fast if production is ever configured with an unsupported
+   * legacy provider.
+   */
+  const dataProvider = dataProviderName();
+  const storageProvider = storageProviderName();
+
+  if (
+    dataProvider !== 'google' ||
+    storageProvider !== 'google-drive'
+  ) {
+    return res.status(503).json({
+      success: false,
+      error: 'PROVIDER_CONFIGURATION_ERROR',
+      message:
+        'MSPixelPulse requires Google Sheets and Google Drive providers.',
+    });
   }
+
   return app(req, res);
 }

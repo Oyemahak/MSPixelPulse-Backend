@@ -1,4 +1,4 @@
-import mongoose from 'mongoose';
+// src/lib/deleteUserPermanently.js
 
 import BlogReaction from '../models/BlogReaction.js';
 import File from '../models/File.js';
@@ -11,7 +11,6 @@ import Task from '../models/Task.js';
 import Thread from '../models/Thread.js';
 import User from '../models/User.js';
 
-import { dataProviderName } from '../config/providers.js';
 import {
   GOOGLE_SHEET_TABS,
   GoogleSheetsRepository,
@@ -21,17 +20,30 @@ import {
   removeObjects,
 } from './storage.js';
 
-function attachmentPaths(messages = []) {
+function attachmentPaths(
+  messages = [],
+) {
   return messages
-    .flatMap((message) => message.attachments || [])
-    .map((attachment) => attachment.path)
+    .flatMap(
+      (message) =>
+        message.attachments ||
+        [],
+    )
+    .map(
+      (attachment) =>
+        attachment.path,
+    )
     .filter(Boolean);
 }
 
-async function cleanupStoragePaths(paths = []) {
+async function cleanupStoragePaths(
+  paths = [],
+) {
   const uniquePaths = [
     ...new Set(
-      (paths || []).filter(Boolean),
+      (paths || []).filter(
+        Boolean,
+      ),
     ),
   ];
 
@@ -40,7 +52,9 @@ async function cleanupStoragePaths(paths = []) {
   }
 
   try {
-    await removeObjects(uniquePaths);
+    await removeObjects(
+      uniquePaths,
+    );
 
     return false;
   } catch (error) {
@@ -55,420 +69,21 @@ async function cleanupStoragePaths(paths = []) {
   }
 }
 
-export async function deleteUserPermanently(user) {
-  if (dataProviderName() === 'google') {
-    return deleteGoogleUserPermanently(user);
-  }
-
-  const userId = user._id;
-
-  const session =
-    await mongoose.startSession();
-
-  let deletedDirectMessages = 0;
-  let detachedProjects = 0;
-  let anonymizedRoomMessages = 0;
-
-  let storagePaths =
-    user.avatarPath
-      ? [user.avatarPath]
-      : [];
-
-  try {
-    await session.withTransaction(
-      async () => {
-        const threads =
-          await Thread.find({
-            participants: userId,
-          })
-            .select('_id')
-            .session(session)
-            .lean();
-
-        const threadIds =
-          threads.map(
-            (thread) =>
-              thread._id,
-          );
-
-        const directMessages =
-          threadIds.length
-            ? await Message.find({
-                kind: 'dm',
-
-                thread: {
-                  $in: threadIds,
-                },
-              })
-                .select(
-                  '_id attachments',
-                )
-                .session(session)
-                .lean()
-            : [];
-
-        storagePaths = [
-          ...storagePaths,
-          ...attachmentPaths(
-            directMessages,
-          ),
-        ];
-
-        if (threadIds.length) {
-          const removedMessages =
-            await Message.deleteMany(
-              {
-                kind: 'dm',
-
-                thread: {
-                  $in: threadIds,
-                },
-              },
-              {
-                session,
-              },
-            );
-
-          deletedDirectMessages =
-            removedMessages.deletedCount ||
-            0;
-
-          await Thread.deleteMany(
-            {
-              _id: {
-                $in: threadIds,
-              },
-            },
-            {
-              session,
-            },
-          );
-        }
-
-        const clientProjects =
-          await Project.updateMany(
-            {
-              client: userId,
-            },
-            {
-              $set: {
-                client: null,
-              },
-            },
-            {
-              session,
-            },
-          );
-
-        const developerProjects =
-          await Project.updateMany(
-            {
-              developer: userId,
-            },
-            {
-              $set: {
-                developer: null,
-              },
-            },
-            {
-              session,
-            },
-          );
-
-        detachedProjects =
-          (clientProjects.modifiedCount ||
-            0) +
-          (developerProjects.modifiedCount ||
-            0);
-
-        await Project.updateMany(
-          {
-            'evidence.author':
-              userId,
-          },
-          {
-            $set: {
-              'evidence.$[entry].author':
-                null,
-            },
-          },
-          {
-            arrayFilters: [
-              {
-                'entry.author':
-                  userId,
-              },
-            ],
-
-            session,
-          },
-        );
-
-        await Project.updateMany(
-          {
-            'announcements.author':
-              userId,
-          },
-          {
-            $set: {
-              'announcements.$[entry].author':
-                null,
-            },
-          },
-          {
-            arrayFilters: [
-              {
-                'entry.author':
-                  userId,
-              },
-            ],
-
-            session,
-          },
-        );
-
-        const messageResult =
-          await Message.updateMany(
-            {
-              author: userId,
-            },
-            {
-              $set: {
-                author: null,
-
-                authorDeleted:
-                  true,
-
-                authorNameAtSend:
-                  'Deleted user',
-
-                authorEmailAtSend:
-                  '',
-              },
-            },
-            {
-              session,
-            },
-          );
-
-        anonymizedRoomMessages =
-          messageResult.modifiedCount ||
-          0;
-
-        await Message.updateMany(
-          {
-            readBy: userId,
-          },
-          {
-            $pull: {
-              readBy: userId,
-            },
-          },
-          {
-            session,
-          },
-        );
-
-        await Requirement.updateMany(
-          {
-            client: userId,
-          },
-          {
-            $set: {
-              client: null,
-            },
-          },
-          {
-            session,
-          },
-        );
-
-        await Invoice.updateMany(
-          {
-            client: userId,
-          },
-          {
-            $set: {
-              client: null,
-            },
-          },
-          {
-            session,
-          },
-        );
-
-        await Invoice.updateMany(
-          {
-            uploadedBy: userId,
-          },
-          {
-            $set: {
-              uploadedBy: null,
-            },
-          },
-          {
-            session,
-          },
-        );
-
-        await Task.updateMany(
-          {
-            assignee: userId,
-          },
-          {
-            $set: {
-              assignee: null,
-            },
-          },
-          {
-            session,
-          },
-        );
-
-        await File.updateMany(
-          {
-            uploader: userId,
-          },
-          {
-            $set: {
-              uploader: null,
-
-              uploaderName:
-                'Deleted user',
-            },
-          },
-          {
-            session,
-          },
-        );
-
-        await BlogReaction.updateMany(
-          {
-            user: userId,
-          },
-          {
-            $set: {
-              user: null,
-            },
-          },
-          {
-            session,
-          },
-        );
-
-        await User.updateMany(
-          {
-            'accessApplication.decidedBy':
-              userId,
-          },
-          {
-            $set: {
-              'accessApplication.decidedBy':
-                null,
-            },
-          },
-          {
-            session,
-          },
-        );
-
-        await SupportTicket.updateMany(
-          {
-            requester: userId,
-          },
-          {
-            $set: {
-              requester: null,
-
-              requesterName:
-                'Deleted user',
-
-              requesterEmail:
-                '',
-            },
-          },
-          {
-            session,
-          },
-        );
-
-        await SupportTicket.updateMany(
-          {
-            'replies.author':
-              userId,
-          },
-          {
-            $set: {
-              'replies.$[reply].author':
-                null,
-
-              'replies.$[reply].authorNameAtSend':
-                'Deleted user',
-            },
-          },
-          {
-            arrayFilters: [
-              {
-                'reply.author':
-                  userId,
-              },
-            ],
-
-            session,
-          },
-        );
-
-        const deleted =
-          await User.deleteOne(
-            {
-              _id: userId,
-            },
-            {
-              session,
-            },
-          );
-
-        if (
-          deleted.deletedCount !==
-          1
-        ) {
-          throw new Error(
-            'User deletion did not complete',
-          );
-        }
-      },
-    );
-  } finally {
-    await session.endSession();
-  }
-
-  const cleanupPending =
-    await cleanupStoragePaths(
-      storagePaths,
-    );
-
-  return {
-    deletedUserId:
-      String(userId),
-
-    detachedProjects,
-
-    deletedDirectMessages,
-
-    anonymizedRoomMessages,
-
-    cleanupPending,
-  };
-}
-
-async function deleteGoogleUserPermanently(
+export async function deleteUserPermanently(
   user,
 ) {
   const userId =
     String(
-      user._id ||
-        user.id,
+      user?._id ||
+        user?.id ||
+        '',
     );
+
+  if (!userId) {
+    throw new Error(
+      'User id is required',
+    );
+  }
 
   let deletedDirectMessages = 0;
   let detachedProjects = 0;
@@ -479,9 +94,13 @@ async function deleteGoogleUserPermanently(
       ? [user.avatarPath]
       : [];
 
+  /*
+   * Remove direct-message threads owned by the deleted user.
+   */
   const threads =
     await Thread.find({
-      participants: userId,
+      participants:
+        userId,
     }).lean();
 
   const threadIds =
@@ -498,7 +117,8 @@ async function deleteGoogleUserPermanently(
         kind: 'dm',
 
         thread: {
-          $in: threadIds,
+          $in:
+            threadIds,
         },
       }).lean();
 
@@ -513,7 +133,8 @@ async function deleteGoogleUserPermanently(
         kind: 'dm',
 
         thread: {
-          $in: threadIds,
+          $in:
+            threadIds,
         },
       });
 
@@ -523,11 +144,16 @@ async function deleteGoogleUserPermanently(
 
     await Thread.deleteMany({
       _id: {
-        $in: threadIds,
+        $in:
+          threadIds,
       },
     });
   }
 
+  /*
+   * Detach the account from projects while preserving
+   * the historical project records.
+   */
   const projects =
     (
       await Project.find({})
@@ -563,7 +189,10 @@ async function deleteGoogleUserPermanently(
         ),
     );
 
-  for (const project of projects) {
+  for (
+    const project of
+    projects
+  ) {
     if (
       String(
         project.client ||
@@ -572,6 +201,9 @@ async function deleteGoogleUserPermanently(
     ) {
       project.client =
         null;
+
+      project.clientId =
+        '';
 
       detachedProjects +=
         1;
@@ -585,6 +217,9 @@ async function deleteGoogleUserPermanently(
     ) {
       project.developer =
         null;
+
+      project.developerId =
+        '';
 
       detachedProjects +=
         1;
@@ -629,9 +264,13 @@ async function deleteGoogleUserPermanently(
     await project.save();
   }
 
+  /*
+   * Keep project-room history but anonymize the author.
+   */
   const authoredMessages =
     await Message.find({
-      author: userId,
+      author:
+        userId,
     });
 
   for (
@@ -658,7 +297,8 @@ async function deleteGoogleUserPermanently(
 
   const readMessages =
     await Message.find({
-      readBy: userId,
+      readBy:
+        userId,
     });
 
   for (
@@ -683,31 +323,40 @@ async function deleteGoogleUserPermanently(
 
   await Requirement.updateMany(
     {
-      client: userId,
+      client:
+        userId,
     },
     {
       $set: {
-        client: null,
-        clientId: '',
+        client:
+          null,
+
+        clientId:
+          '',
       },
     },
   );
 
   await Invoice.updateMany(
     {
-      client: userId,
+      client:
+        userId,
     },
     {
       $set: {
-        client: null,
-        clientId: '',
+        client:
+          null,
+
+        clientId:
+          '',
       },
     },
   );
 
   await Invoice.updateMany(
     {
-      uploadedBy: userId,
+      uploadedBy:
+        userId,
     },
     {
       $set: {
@@ -725,13 +374,19 @@ async function deleteGoogleUserPermanently(
 
   await Task.updateMany(
     {
-      assignee: userId,
+      assignee:
+        userId,
     },
     {
       $set: {
-        assignee: null,
-        assigneeId: '',
-        userId: '',
+        assignee:
+          null,
+
+        assigneeId:
+          '',
+
+        userId:
+          '',
       },
     },
   );
@@ -774,12 +429,16 @@ async function deleteGoogleUserPermanently(
 
   await BlogReaction.updateMany(
     {
-      user: userId,
+      user:
+        userId,
     },
     {
       $set: {
-        user: null,
-        userId: '',
+        user:
+          null,
+
+        userId:
+          '',
       },
     },
   );
@@ -799,7 +458,9 @@ async function deleteGoogleUserPermanently(
 
   const tickets =
     (
-      await SupportTicket.find({})
+      await SupportTicket.find(
+        {},
+      )
     ).filter(
       (ticket) =>
         String(
@@ -818,7 +479,10 @@ async function deleteGoogleUserPermanently(
         ),
     );
 
-  for (const ticket of tickets) {
+  for (
+    const ticket of
+    tickets
+  ) {
     if (
       String(
         ticket.requester ||
@@ -866,6 +530,9 @@ async function deleteGoogleUserPermanently(
     await ticket.save();
   }
 
+  /*
+   * Project membership is stored independently in Sheets.
+   */
   const members =
     new GoogleSheetsRepository(
       GOOGLE_SHEET_TABS.projectMembers,
@@ -880,18 +547,21 @@ async function deleteGoogleUserPermanently(
       limit: 500,
     });
 
-  for (
-    const member of
-    assigned.items
+  if (
+    assigned.items.length
   ) {
-    await members.delete(
-      member.id,
+    await members.deleteMany(
+      assigned.items.map(
+        (member) =>
+          member.id,
+      ),
     );
   }
 
   const deleted =
     await User.deleteOne({
-      _id: userId,
+      _id:
+        userId,
     });
 
   if (

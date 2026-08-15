@@ -1,52 +1,129 @@
-import { dataProviderName } from '../config/providers.js';
-import { GoogleSheetsRepository } from '../google/sheets.js';
-import { MongooseRepository } from './mongoose.repository.js';
+// src/repositories/entity.repository.js
+
+import {
+  GoogleSheetsRepository,
+} from '../google/sheets.js';
 
 /**
- * Provider-neutral repository façade. It intentionally returns stable `id`
- * strings for both stores, while preserving raw Mongo `_id` values for the
- * current controller layer.
+ * Google Sheets entity repository.
+ *
+ * Stable application IDs are used instead of spreadsheet row numbers.
+ * Mongoose models may still exist as controller/schema compatibility
+ * façades, but persistent data is stored in Google Sheets.
  */
 export class EntityRepository {
-  constructor({ tab, model, aliases = {}, idField = 'id' }) {
+  constructor({
+    tab,
+    idField = 'id',
+  }) {
     this.tab = tab;
-    this.idField = idField;
-    this.mongo = model ? new MongooseRepository(model, { aliases }) : null;
-    this.google = new GoogleSheetsRepository(tab, { idField });
+    this.idField =
+      idField;
+
+    this.google =
+      new GoogleSheetsRepository(
+        tab,
+        {
+          idField,
+        },
+      );
   }
 
-  active() {
-    if (dataProviderName() === 'google') return this.google;
-    if (!this.mongo) {
-      const error = new Error(`${this.tab} has no MongoDB fallback repository`);
-      error.code = 'MONGO_REPOSITORY_UNAVAILABLE';
-      error.status = 503;
-      throw error;
-    }
-    return this.mongo;
+  findById(id, options) {
+    return this.google.findById(
+      id,
+      options,
+    );
   }
 
-  findById(id, options) { return this.active().findById(id, options); }
-  findOne(filter, options) { return this.active().findOne(filter, options); }
-  list(options) { return this.active().list(options); }
-  create(input) { return this.active().create(input); }
-  update(id, patch) { return this.active().update(id, patch); }
-  delete(id) { return this.active().delete(id); }
-
-  findByEmail(email, options) {
-    return this.findOne({ email: String(email || '').trim().toLowerCase() }, options);
+  findOne(filter, options) {
+    return this.google.findOne(
+      filter,
+      options,
+    );
   }
 
-  findByProject(projectId, options = {}) {
-    return this.list({ ...options, filter: { ...(options.filter || {}), projectId } });
+  list(options) {
+    return this.google.list(
+      options,
+    );
   }
 
-  findByUser(userId, options = {}) {
-    return this.list({ ...options, filter: { ...(options.filter || {}), userId } });
+  create(input) {
+    return this.google.create(
+      input,
+    );
+  }
+
+  update(id, patch) {
+    return this.google.update(
+      id,
+      patch,
+    );
+  }
+
+  delete(id) {
+    return this.google.delete(
+      id,
+    );
+  }
+
+  findByEmail(
+    email,
+    options,
+  ) {
+    return this.findOne(
+      {
+        email:
+          String(
+            email || '',
+          )
+            .trim()
+            .toLowerCase(),
+      },
+      options,
+    );
+  }
+
+  findByProject(
+    projectId,
+    options = {},
+  ) {
+    return this.list({
+      ...options,
+
+      filter: {
+        ...(options.filter ||
+          {}),
+
+        projectId:
+          String(projectId),
+      },
+    });
+  }
+
+  findByUser(
+    userId,
+    options = {},
+  ) {
+    return this.list({
+      ...options,
+
+      filter: {
+        ...(options.filter ||
+          {}),
+
+        userId:
+          String(userId),
+      },
+    });
   }
 }
 
-export function createEntityRepository(config) {
-  return new EntityRepository(config);
+export function createEntityRepository(
+  config,
+) {
+  return new EntityRepository(
+    config,
+  );
 }
-

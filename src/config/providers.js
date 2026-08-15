@@ -1,5 +1,6 @@
+// src/config/providers.js
+
 const DATA_PROVIDERS = new Set([
-  'mongodb',
   'google',
 ]);
 
@@ -7,14 +8,23 @@ const STORAGE_PROVIDERS = new Set([
   'google-drive',
 ]);
 
-function configured(value, fallback, supported, envName) {
-  const normalized = String(value || fallback)
+function configured(
+  value,
+  fallback,
+  supported,
+  envName,
+) {
+  const normalized = String(
+    value || fallback,
+  )
     .trim()
     .toLowerCase();
 
   if (!supported.has(normalized)) {
     const error = new Error(
-      `${envName} must be one of: ${[...supported].join(', ')}`,
+      `${envName} must be one of: ${[
+        ...supported,
+      ].join(', ')}`,
     );
 
     error.code = 'INVALID_PROVIDER';
@@ -29,7 +39,7 @@ function configured(value, fallback, supported, envName) {
 export function dataProviderName() {
   return configured(
     process.env.DATA_PROVIDER,
-    'mongodb',
+    'google',
     DATA_PROVIDERS,
     'DATA_PROVIDER',
   );

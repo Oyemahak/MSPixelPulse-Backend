@@ -1,22 +1,23 @@
+// src/config/providers.test.js
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
   dataProviderName,
   storageProviderName,
+  providerStatus,
 } from './providers.js';
 
 function withEnv(
   name,
   value,
-  operation,
+  callback,
 ) {
   const previous =
     process.env[name];
 
-  if (
-    value === undefined
-  ) {
+  if (value === undefined) {
     delete process.env[name];
   } else {
     process.env[name] =
@@ -24,11 +25,9 @@ function withEnv(
   }
 
   try {
-    return operation();
+    return callback();
   } finally {
-    if (
-      previous === undefined
-    ) {
+    if (previous === undefined) {
       delete process.env[name];
     } else {
       process.env[name] =
@@ -38,51 +37,91 @@ function withEnv(
 }
 
 test(
-  'provider configuration keeps MongoDB as temporary data fallback and Google Drive as storage default',
+  'provider configuration defaults to Google Sheets and Google Drive',
   () => {
     withEnv(
       'DATA_PROVIDER',
       undefined,
-      () =>
-        assert.equal(
-          dataProviderName(),
-          'mongodb',
-        ),
-    );
+      () => {
+        withEnv(
+          'STORAGE_PROVIDER',
+          undefined,
+          () => {
+            assert.equal(
+              dataProviderName(),
+              'google',
+            );
 
-    withEnv(
-      'STORAGE_PROVIDER',
-      undefined,
-      () =>
-        assert.equal(
-          storageProviderName(),
-          'google-drive',
-        ),
+            assert.equal(
+              storageProviderName(),
+              'google-drive',
+            );
+
+            assert.deepEqual(
+              providerStatus(),
+              {
+                data: 'google',
+                storage: 'google-drive',
+              },
+            );
+          },
+        );
+      },
     );
   },
 );
 
 test(
-  'provider configuration accepts Google runtime providers',
+  'provider configuration accepts Google production providers',
   () => {
     withEnv(
       'DATA_PROVIDER',
       'google',
-      () =>
-        assert.equal(
-          dataProviderName(),
-          'google',
-        ),
-    );
-
-    withEnv(
-      'STORAGE_PROVIDER',
-      'google-drive',
-      () =>
-        assert.equal(
-          storageProviderName(),
+      () => {
+        withEnv(
+          'STORAGE_PROVIDER',
           'google-drive',
-        ),
+          () => {
+            assert.equal(
+              dataProviderName(),
+              'google',
+            );
+
+            assert.equal(
+              storageProviderName(),
+              'google-drive',
+            );
+
+            assert.deepEqual(
+              providerStatus(),
+              {
+                data: 'google',
+                storage: 'google-drive',
+              },
+            );
+          },
+        );
+      },
+    );
+  },
+);
+
+test(
+  'provider configuration rejects unsupported data providers',
+  () => {
+    withEnv(
+      'DATA_PROVIDER',
+      'unsupported-data-provider',
+      () => {
+        assert.throws(
+          () =>
+            dataProviderName(),
+          {
+            code:
+              'INVALID_PROVIDER',
+          },
+        );
+      },
     );
   },
 );
@@ -92,15 +131,44 @@ test(
   () => {
     withEnv(
       'STORAGE_PROVIDER',
-      'supabase',
-      () =>
+      'unsupported-storage-provider',
+      () => {
         assert.throws(
-          storageProviderName,
+          () =>
+            storageProviderName(),
           {
             code:
               'INVALID_PROVIDER',
           },
-        ),
+        );
+      },
+    );
+  },
+);
+
+test(
+  'provider configuration normalizes provider values',
+  () => {
+    withEnv(
+      'DATA_PROVIDER',
+      ' GOOGLE ',
+      () => {
+        withEnv(
+          'STORAGE_PROVIDER',
+          ' GOOGLE-DRIVE ',
+          () => {
+            assert.equal(
+              dataProviderName(),
+              'google',
+            );
+
+            assert.equal(
+              storageProviderName(),
+              'google-drive',
+            );
+          },
+        );
+      },
     );
   },
 );
