@@ -1,5 +1,6 @@
 // src/models/Lead.js
 import mongoose from "mongoose";
+import { createProviderModel } from '../providers/providerModel.js';
 
 const LeadSchema = new mongoose.Schema(
   {
@@ -39,4 +40,8 @@ const LeadSchema = new mongoose.Schema(
 LeadSchema.index({ createdAt: -1 });
 LeadSchema.index({ source: 1, status: 1 });
 
-export default mongoose.model("Lead", LeadSchema);
+const Lead = mongoose.model("Lead", LeadSchema);
+export default createProviderModel(Lead, {
+  modelName: 'Lead', tab: 'Leads',
+  defaults: { inquiryType: 'Website Inquiry', status: 'new', source: 'public-contact', emailDeliveryStatus: 'pending', confirmationEmailStatus: 'pending' },
+});

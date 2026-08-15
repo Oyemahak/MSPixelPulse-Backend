@@ -39,6 +39,7 @@ process.env.GOOGLE_DRIVE_PROJECT_FILES_FOLDER_ID = testDriveRoot;
 process.env.DATA_PROVIDER = 'google';
 process.env.STORAGE_PROVIDER = 'google-drive';
 process.env.GOOGLE_PHASE1_SMOKE_TEST = 'true';
+process.env.GOOGLE_SHEETS_CACHE_TTL_MS = '300000';
 
 const { assertPhase1GoogleTargets } = await import('../google/phase1SmokeSafety.js');
 const targets = assertPhase1GoogleTargets();

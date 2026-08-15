@@ -14,3 +14,15 @@ export function verifyDriveFileAccess(token, fileId) {
   }
 }
 
+export function signDriveUploadCompletion(payload, expiresInSeconds = 30 * 60) {
+  return jwt.sign({ scope: 'drive-upload', ...payload }, jwtSecret(), { expiresIn: expiresInSeconds });
+}
+
+export function verifyDriveUploadCompletion(token) {
+  try {
+    const payload = jwt.verify(String(token || ''), jwtSecret());
+    return payload?.scope === 'drive-upload' ? payload : null;
+  } catch {
+    return null;
+  }
+}

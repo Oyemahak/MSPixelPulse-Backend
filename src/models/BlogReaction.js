@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { createProviderModel } from '../providers/providerModel.js';
 
 const BlogReactionSchema = new mongoose.Schema(
   {
@@ -14,4 +15,7 @@ const BlogReactionSchema = new mongoose.Schema(
 
 BlogReactionSchema.index({ blogSlug: 1, identityHash: 1 }, { unique: true });
 
-export default mongoose.model("BlogReaction", BlogReactionSchema);
+const BlogReaction = mongoose.model("BlogReaction", BlogReactionSchema);
+export default createProviderModel(BlogReaction, {
+  modelName: 'BlogReaction', tab: 'BlogReactions', relations: { user: 'User' }, unique: [['blogSlug', 'identityHash']],
+});

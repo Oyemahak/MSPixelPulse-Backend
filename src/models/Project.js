@@ -1,6 +1,7 @@
 // backend/src/models/Project.js
 import mongoose from 'mongoose';
 import slugify from '../utils/slugify.js';
+import { createProviderModel } from '../providers/providerModel.js';
 
 // ─────────────────────────────────────────────────────────────
 // Evidence (unchanged from your current shape)
@@ -156,4 +157,14 @@ ProjectSchema.pre('validate', async function (next) {
 });
 
 const Project = mongoose.model('Project', ProjectSchema);
-export default Project;
+export default createProviderModel(Project, {
+  modelName: 'Project',
+  tab: 'Projects',
+  relations: { client: 'User', developer: 'User' },
+  unique: [['slug'], ['repositoryFullName']],
+  defaults: {
+    summary: '', status: 'draft', evidence: [], announcements: [], projectClassification: 'demo',
+    technologies: [], categories: [], mockupImages: [], galleryImages: [], keyFeatures: [],
+    responsiveHighlights: [], servicesProvided: [], featured: false, published: false, displayOrder: 999,
+  },
+});

@@ -14,11 +14,12 @@ import { jwtSecret } from './utils/jwt.js';
 import { corsOptions } from './config/cors.js';
 import { canReadProject } from './lib/projectAccess.js';
 import { isPortalAccountActive } from './lib/accountPolicy.js';
+import { dataProviderName } from './config/providers.js';
 
 const PORT = process.env.PORT || 4000;
 
 async function boot() {
-  await connectDB();
+  if (dataProviderName() === 'mongodb') await connectDB();
 
   const server = http.createServer(app);
   const io = new Server(server, {

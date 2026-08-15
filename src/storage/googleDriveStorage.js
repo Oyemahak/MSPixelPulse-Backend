@@ -16,6 +16,10 @@ function cleanSegment(value) {
   return String(value || '').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 120) || 'unassigned';
 }
 
+function logicalPathHash(logicalPath) {
+  return crypto.createHash('sha256').update(String(logicalPath)).digest('hex');
+}
+
 function logicalFileDetails(logicalPath, metadata = {}) {
   const pieces = String(logicalPath || '').split('/').filter(Boolean);
   if (pieces[0] === 'avatars') {
@@ -40,6 +44,26 @@ function logicalFileDetails(logicalPath, metadata = {}) {
       storedName: pieces.at(-1) || 'upload.bin',
     };
   }
+  if (metadata.projectId) {
+    return {
+      kind: 'project',
+      projectId: String(metadata.projectId),
+      clientId: String(metadata.clientId || ''),
+      userId: String(metadata.userId || metadata.uploadedBy || ''),
+      category: String(metadata.category || 'uploads').toLowerCase(),
+      storedName: pieces.at(-1) || 'upload.bin',
+    };
+  }
+  if (metadata.clientId || metadata.userId) {
+    const userId = String(metadata.userId || metadata.clientId || '');
+    return {
+      kind: 'client',
+      userId,
+      clientId: String(metadata.clientId || userId),
+      category: String(metadata.category || 'documents').toLowerCase(),
+      storedName: pieces.at(-1) || 'upload.bin',
+    };
+  }
   return {
     kind: 'root',
     userId: String(metadata.userId || ''),
@@ -48,6 +72,12 @@ function logicalFileDetails(logicalPath, metadata = {}) {
     category: String(metadata.category || 'uploads'),
     storedName: pieces.at(-1) || 'upload.bin',
   };
+}
+
+function clientFolderRole(category) {
+  if (category === 'profile') return 'Profile';
+  if (['requirement', 'requirements'].includes(category)) return 'Requirements';
+  return 'Documents';
 }
 
 function projectFolderRole(category) {
@@ -84,12 +114,13 @@ export class GoogleDriveStorage {
     const details = logicalFileDetails(logicalPath, metadata);
     const roots = googleDriveRoots();
     if (details.kind === 'client') {
+      const folderRole = clientFolderRole(details.category);
       return googleDrive.ensureFolderPath({
         parentId: roots.clientFiles,
         metadata: { entityType: 'client', clientId: details.clientId || details.userId },
         segments: [
           { name: `client-${cleanSegment(details.clientId || details.userId)}`, role: 'Client', metadata: { clientId: details.clientId || details.userId } },
-          { name: 'Profile', role: 'Profile' },
+          { name: folderRole, role: folderRole },
         ],
       });
     }
@@ -127,7 +158,7 @@ export class GoogleDriveStorage {
         buffer,
         mimeType: contentType,
         appProperties: {
-          logicalPath: String(logicalPath),
+          logicalPathHash: logicalPathHash(logicalPath),
           projectId: details.projectId,
           clientId: details.clientId,
           userId: details.userId,
@@ -157,6 +188,86 @@ export class GoogleDriveStorage {
     return { path: String(logicalPath), url: await this.createSignedUrl(logicalPath), file: record };
   }
 
+  async createResumableUpload(logicalPath, file, metadata = {}) {
+    this.ensureReady();
+    const details = logicalFileDetails(logicalPath, metadata);
+    const folder = await this.folderFor(logicalPath, metadata);
+    const storedName = path.basename(details.storedName);
+    const uploadNonce = String(metadata.uploadNonce || crypto.randomUUID());
+    const session = await googleDrive.createResumableUploadSession({
+      name: storedName,
+      parentId: folder.parentId,
+      mimeType: file.mimetype,
+      size: file.size,
+      appProperties: {
+        logicalPathHash: logicalPathHash(logicalPath),
+        projectId: details.projectId,
+        clientId: details.clientId,
+        userId: details.userId,
+        category: details.category,
+        uploadNonce,
+      },
+    });
+    return { ...session, uploadNonce, parentDriveFolderId: folder.parentId };
+  }
+
+  async finalizeResumableUpload(logicalPath, driveFileId, metadata = {}) {
+    this.ensureReady();
+    const details = logicalFileDetails(logicalPath, metadata);
+    const driveFile = await googleDrive.getMetadata(driveFileId);
+    if (driveFile.trashed) {
+      const error = new Error('Uploaded file is unavailable');
+      error.status = 400;
+      throw error;
+    }
+    const properties = driveFile.appProperties || {};
+    const expectedNonce = String(metadata.uploadNonce || '');
+    if (
+      properties.mspixelpulseManaged !== 'true' ||
+      properties.logicalPathHash !== logicalPathHash(logicalPath) ||
+      properties.uploadNonce !== expectedNonce ||
+      String(properties.userId || '') !== String(details.userId || '') ||
+      String(properties.projectId || '') !== String(details.projectId || '')
+    ) {
+      const error = new Error('Uploaded file metadata did not match the authorized session');
+      error.status = 403;
+      error.code = 'DRIVE_UPLOAD_METADATA_MISMATCH';
+      throw error;
+    }
+    if (
+      String(driveFile.mimeType || '') !== String(metadata.mimeType || '') ||
+      Number(driveFile.size || 0) !== Number(metadata.size || 0)
+    ) {
+      const error = new Error('Uploaded file did not match its declared type or size');
+      error.status = 400;
+      error.code = 'DRIVE_UPLOAD_FILE_MISMATCH';
+      throw error;
+    }
+
+    const existing = await this.recordForPath(logicalPath);
+    const recordPayload = {
+      id: existing?.id || crypto.randomUUID(),
+      driveFileId: driveFile.id,
+      parentDriveFolderId: driveFile.parents?.[0] || String(metadata.parentDriveFolderId || ''),
+      logicalPath: String(logicalPath),
+      userId: details.userId,
+      clientId: details.clientId,
+      projectId: details.projectId,
+      roomId: String(metadata.roomId || ''),
+      originalName: String(metadata.originalName || driveFile.name || details.storedName),
+      storedName: driveFile.name || details.storedName,
+      mimeType: driveFile.mimeType,
+      size: String(driveFile.size || metadata.size),
+      category: details.category,
+      uploadedBy: String(metadata.uploadedBy || metadata.userId || ''),
+      isPublic: Boolean(metadata.isPublic || details.category === 'cover'),
+    };
+    const record = existing
+      ? await googleFilesRepository.update(existing.id, recordPayload)
+      : await googleFilesRepository.create(recordPayload);
+    return { path: String(logicalPath), url: await this.createSignedUrl(logicalPath), file: record };
+  }
+
   async createSignedUrl(logicalPath, expiresInSeconds = 60 * 60 * 24 * 7) {
     const record = await this.recordForPath(logicalPath);
     if (!record?.driveFileId) return '';
@@ -172,7 +283,11 @@ export class GoogleDriveStorage {
     if (!logicalPath) return;
     const record = await this.recordForPath(logicalPath);
     if (!record) return;
-    await googleDrive.deleteFile(record.driveFileId);
+    try {
+      await googleDrive.deleteFile(record.driveFileId);
+    } catch (error) {
+      if (Number(error?.status || error?.code) !== 404) throw error;
+    }
     await googleFilesRepository.delete(record.id);
   }
 
@@ -203,3 +318,8 @@ export class GoogleDriveStorage {
 
 export const googleDriveStorage = new GoogleDriveStorage();
 
+export const googleDriveStorageInternals = {
+  clientFolderRole,
+  logicalFileDetails,
+  projectFolderRole,
+};

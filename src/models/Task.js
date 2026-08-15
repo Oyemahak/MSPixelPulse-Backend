@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { createProviderModel } from '../providers/providerModel.js';
 
 const taskSchema = new mongoose.Schema(
   {
@@ -11,4 +12,7 @@ const taskSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-export default mongoose.model('Task', taskSchema);
+const Task = mongoose.model('Task', taskSchema);
+export default createProviderModel(Task, {
+  modelName: 'Task', tab: 'Tasks', relations: { project: 'Project', assignee: 'User' }, defaults: { status: 'todo' },
+});

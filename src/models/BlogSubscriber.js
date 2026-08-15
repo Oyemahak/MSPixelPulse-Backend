@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { createProviderModel } from '../providers/providerModel.js';
 
 const BlogSubscriberSchema = new mongoose.Schema(
   {
@@ -33,4 +34,8 @@ const BlogSubscriberSchema = new mongoose.Schema(
 
 BlogSubscriberSchema.index({ status: 1, createdAt: -1 });
 
-export default mongoose.model("BlogSubscriber", BlogSubscriberSchema);
+const BlogSubscriber = mongoose.model("BlogSubscriber", BlogSubscriberSchema);
+export default createProviderModel(BlogSubscriber, {
+  modelName: 'BlogSubscriber', tab: 'BlogSubscribers', unique: [['email']],
+  defaults: { status: 'pending', confirmationEmailStatus: 'pending', notificationEmailStatus: 'pending' },
+});

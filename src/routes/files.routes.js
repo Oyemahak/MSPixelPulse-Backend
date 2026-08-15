@@ -1,6 +1,7 @@
 // backend/src/routes/files.routes.js
 import { Router } from "express";
 import multer from "multer";
+import crypto from 'crypto';
 import { uploadBuffer } from "../lib/supabase.js";
 import { optionalAuth, requireAuth } from "../middleware/auth.js";
 import Project from "../models/Project.js";
@@ -10,6 +11,8 @@ import { storageProviderName } from '../config/providers.js';
 import { findFileByDriveFileId } from '../repositories/files.repository.js';
 import { getStorageProvider } from '../storage/provider.js';
 import { verifyDriveFileAccess } from '../storage/fileAccessToken.js';
+import { signDriveUploadCompletion, verifyDriveUploadCompletion } from '../storage/fileAccessToken.js';
+import User from '../models/User.js';
 
 const router = Router();
 
@@ -17,6 +20,170 @@ const router = Router();
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 15 * 1024 * 1024 },
+});
+
+const DIRECT_UPLOAD_PURPOSES = new Set(['invoice', 'evidence', 'cover', 'message', 'requirement', 'avatar']);
+
+function directUploadPath({ purpose, projectId, userId, originalName, requirementField }) {
+  const suffix = `${Date.now()}_${crypto.randomUUID()}_${cleanFileName(originalName)}`;
+  if (purpose === 'avatar') return `avatars/${userId}/${suffix}`;
+  if (purpose === 'requirement') {
+    const field = String(requirementField || 'supporting');
+    if (field === 'logo') return `projects/${projectId}/requirements/core/logo/${suffix}`;
+    if (field === 'brief') return `projects/${projectId}/requirements/core/brief/${suffix}`;
+    if (field === 'supporting') return `projects/${projectId}/requirements/supporting/${suffix}`;
+    if (field.startsWith('page:')) {
+      const pageName = cleanFileName(field.slice(5)).replace(/\.+/g, '_') || 'page';
+      return `projects/${projectId}/requirements/pages/${pageName}/${suffix}`;
+    }
+    return '';
+  }
+  const now = new Date();
+  const yyyy = now.getUTCFullYear();
+  const mm = String(now.getUTCMonth() + 1).padStart(2, '0');
+  return `${projectFilePrefix(projectId, purpose)}${yyyy}/${mm}/${suffix}`;
+}
+
+async function authorizeDirectUpload(req, res) {
+  const purpose = String(req.body?.purpose || '').toLowerCase();
+  const projectId = String(req.body?.projectId || '');
+  if (!DIRECT_UPLOAD_PURPOSES.has(purpose)) {
+    res.status(400).json({ error: 'A supported upload purpose is required' });
+    return null;
+  }
+  if (purpose === 'avatar') return { purpose, projectId: '', project: null };
+  if (!projectId) {
+    res.status(400).json({ error: 'projectId is required' });
+    return null;
+  }
+  const project = await Project.findById(projectId).select('_id client developer').lean();
+  if (!project) {
+    res.status(404).json({ error: 'Project not found' });
+    return null;
+  }
+  const isAdmin = req.user?.role === 'admin';
+  const allowed = purpose === 'requirement'
+    ? canReadProject(req.user, project)
+    : ['invoice', 'cover'].includes(purpose)
+      ? isAdmin
+      : purpose === 'evidence'
+        ? canWriteProject(req.user, project)
+        : canReadProject(req.user, project);
+  if (!allowed) {
+    projectAccessError(res);
+    return null;
+  }
+  return { purpose, projectId, project };
+}
+
+/**
+ * Start a private Google Drive resumable upload. Only the small JSON handshake
+ * passes through Vercel; the browser sends the file bytes to Google directly.
+ */
+router.post('/files/upload-session', requireAuth, async (req, res, next) => {
+  try {
+    if (storageProviderName() !== 'google-drive') {
+      return res.status(409).json({ error: 'Direct uploads require Google Drive storage' });
+    }
+    const authorization = await authorizeDirectUpload(req, res);
+    if (!authorization) return;
+    const originalName = String(req.body?.name || '');
+    const mimetype = String(req.body?.type || '').toLowerCase();
+    const size = Number(req.body?.size || 0);
+    const requirementField = String(req.body?.requirementField || '');
+    const verdict = validateUpload({ originalname: originalName, mimetype, size }, authorization.purpose);
+    if (!verdict.ok) return res.status(415).json({ error: verdict.message });
+    const userId = String(req.user?._id || '');
+    const logicalPath = directUploadPath({
+      purpose: authorization.purpose,
+      projectId: authorization.projectId,
+      userId,
+      originalName,
+      requirementField,
+    });
+    if (!logicalPath) return res.status(400).json({ error: 'Invalid requirement upload field' });
+    const storage = getStorageProvider();
+    const metadata = {
+      projectId: authorization.projectId,
+      clientId: String(authorization.project?.client || (authorization.purpose === 'avatar' ? userId : '')),
+      userId,
+      uploadedBy: userId,
+      category: authorization.purpose === 'requirement' ? 'requirements' : authorization.purpose === 'avatar' ? 'profile' : authorization.purpose,
+      originalName,
+      mimeType: mimetype,
+      size,
+      isPublic: authorization.purpose === 'cover',
+    };
+    const session = await storage.createResumableUpload(logicalPath, { mimetype, size }, metadata);
+    const completionToken = signDriveUploadCompletion({
+      ...metadata,
+      purpose: authorization.purpose,
+      requirementField,
+      logicalPath,
+      uploadNonce: session.uploadNonce,
+      parentDriveFolderId: session.parentDriveFolderId,
+      userId,
+    });
+    return res.json({
+      upload: {
+        url: session.uploadUrl,
+        method: 'PUT',
+        headers: { 'Content-Type': mimetype },
+        completionToken,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/files/upload-complete', requireAuth, async (req, res, next) => {
+  try {
+    if (storageProviderName() !== 'google-drive') return res.status(404).json({ error: 'File not found' });
+    const claims = verifyDriveUploadCompletion(req.body?.completionToken);
+    if (!claims || String(claims.userId || '') !== String(req.user?._id || '')) {
+      return res.status(403).json({ error: 'Upload session is invalid or expired' });
+    }
+    const driveFileId = String(req.body?.driveFileId || '');
+    if (!driveFileId) return res.status(400).json({ error: 'driveFileId is required' });
+
+    // Re-check project authorization at completion so a stale upload session
+    // cannot outlive a role or assignment change.
+    req.body = { purpose: claims.purpose, projectId: claims.projectId };
+    const authorization = await authorizeDirectUpload(req, res);
+    if (!authorization) return;
+
+    const storage = getStorageProvider();
+    const uploaded = await storage.finalizeResumableUpload(claims.logicalPath, driveFileId, claims);
+    if (claims.purpose === 'avatar') {
+      const user = await User.findById(req.user._id);
+      if (!user) return res.status(404).json({ message: 'User not found' });
+      const oldPath = user.avatarPath;
+      user.avatarPath = uploaded.path;
+      user.avatarUrl = uploaded.url;
+      await user.save();
+      let cleanupPending = false;
+      if (oldPath && oldPath !== uploaded.path) {
+        try {
+          await storage.removePath(oldPath);
+        } catch {
+          cleanupPending = true;
+        }
+      }
+      return res.json({ ok: true, avatarUrl: uploaded.url, file: uploaded.file, cleanupPending });
+    }
+    return res.json({
+      file: {
+        name: claims.originalName,
+        type: claims.mimeType,
+        size: Number(claims.size),
+        path: uploaded.path,
+        url: uploaded.url,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 // POST /api/files/upload

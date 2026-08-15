@@ -14,4 +14,5 @@ export { blogReactionsRepository } from './blogReactions.repository.js';
 export { blogSharesRepository } from './blogShares.repository.js';
 export { blogSubscribersRepository } from './blogSubscribers.repository.js';
 export { siteContentRepository } from './siteContent.repository.js';
-
+export { threadsRepository } from './threads.repository.js';
+export { supportTicketsRepository } from './supportTickets.repository.js';

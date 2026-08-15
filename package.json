@@ -27,7 +27,10 @@
     "verify:user-deletion": "node --env-file=.env src/scripts/verifyUserDeletionCascade.js",
     "fixture:portal-e2e": "node --env-file=.env src/scripts/portalE2EFixture.js",
     "fixture:portal-e2e:cleanup": "node --env-file=.env src/scripts/portalE2EFixture.js --cleanup",
-    "test:google-provider": "node --env-file=.env src/scripts/googleProviderSmokeTest.js"
+    "test:google-provider": "node --env-file=.env src/scripts/googleProviderSmokeTest.js",
+    "migrate:mongo-to-google": "node --env-file=.env src/scripts/migrateMongoToGoogleSheets.js --confirm-production",
+    "migrate:supabase-to-drive": "node --env-file=.env src/scripts/migrateSupabaseToGoogleDrive.js --confirm-production",
+    "verify:google-runtime": "DATA_PROVIDER=google STORAGE_PROVIDER=google-drive node --env-file=.env src/scripts/verifyGoogleRuntime.js --confirm-production"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.75.1",

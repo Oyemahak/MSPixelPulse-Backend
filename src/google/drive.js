@@ -1,5 +1,6 @@
 import path from 'path';
-import { getGoogleApis } from './auth.js';
+import { Readable } from 'node:stream';
+import { getGoogleAccessToken, getGoogleApis } from './auth.js';
 import { guardPhase1DriveRootId } from './phase1SmokeSafety.js';
 import { withGoogleRetry } from './retry.js';
 
@@ -31,6 +32,11 @@ function appPropertyQuery(properties = {}) {
   return Object.entries(properties)
     .filter(([, value]) => value !== undefined && value !== null && value !== '')
     .map(([key, value]) => `appProperties has { key='${queryString(key)}' and value='${queryString(value)}' }`);
+}
+
+function mediaBody(value) {
+  if (value && typeof value.pipe === 'function') return value;
+  return Readable.from(Buffer.isBuffer(value) ? value : Buffer.from(value || ''));
 }
 
 function folderQuery({ name, parentId, appProperties = {} }) {
@@ -101,10 +107,64 @@ export class GoogleDriveService {
         mimeType,
         appProperties: { mspixelpulseManaged: 'true', ...appProperties },
       },
-      media: { mimeType, body: buffer },
+      media: { mimeType, body: mediaBody(buffer) },
       fields: 'id,name,mimeType,size,parents,appProperties,createdTime,modifiedTime,md5Checksum',
     }));
     return response.data;
+  }
+
+  /**
+   * Create a Drive resumable-upload session without proxying the file body
+   * through the application server. The opaque session URL is scoped by
+   * Google to this one file, MIME type, and byte length.
+   */
+  async createResumableUploadSession({
+    name,
+    parentId,
+    mimeType = 'application/octet-stream',
+    size,
+    appProperties = {},
+  }) {
+    const accessToken = await getGoogleAccessToken();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15_000);
+    try {
+      const response = await withGoogleRetry(() => fetch(
+        'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,mimeType,size,parents,appProperties,createdTime,modifiedTime,md5Checksum',
+        {
+          method: 'POST',
+          signal: controller.signal,
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json; charset=UTF-8',
+            'X-Upload-Content-Type': String(mimeType),
+            'X-Upload-Content-Length': String(size),
+          },
+          body: JSON.stringify({
+            name: path.basename(String(name || 'upload.bin')),
+            parents: [parentId],
+            mimeType,
+            appProperties: { mspixelpulseManaged: 'true', ...appProperties },
+          }),
+        },
+      ));
+      if (!response.ok) {
+        const error = new Error(`Google Drive upload session failed with HTTP ${response.status}`);
+        error.status = response.status >= 500 ? 503 : 502;
+        error.code = 'GOOGLE_DRIVE_UPLOAD_SESSION_FAILED';
+        throw error;
+      }
+      const uploadUrl = response.headers.get('location');
+      if (!uploadUrl) {
+        const error = new Error('Google Drive did not return a resumable upload URL');
+        error.status = 502;
+        error.code = 'GOOGLE_DRIVE_UPLOAD_SESSION_MISSING';
+        throw error;
+      }
+      return { uploadUrl };
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   async getMetadata(fileId) {
@@ -137,7 +197,7 @@ export class GoogleDriveService {
     const response = await withGoogleRetry(() => drive.files.update({
       fileId,
       requestBody: name ? { name: path.basename(String(name)) } : undefined,
-      media: { mimeType, body: buffer },
+      media: { mimeType, body: mediaBody(buffer) },
       fields: 'id,name,mimeType,size,parents,appProperties,createdTime,modifiedTime,md5Checksum',
     }));
     return response.data;
@@ -168,3 +228,5 @@ export class GoogleDriveService {
 }
 
 export const googleDrive = new GoogleDriveService();
+
+export const driveInternals = { mediaBody };

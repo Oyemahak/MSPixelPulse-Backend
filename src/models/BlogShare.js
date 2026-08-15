@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { createProviderModel } from '../providers/providerModel.js';
 
 const BlogShareSchema = new mongoose.Schema(
   {
@@ -22,4 +23,5 @@ const BlogShareSchema = new mongoose.Schema(
 
 BlogShareSchema.index({ blogSlug: 1, createdAt: -1 });
 
-export default mongoose.model("BlogShare", BlogShareSchema);
+const BlogShare = mongoose.model("BlogShare", BlogShareSchema);
+export default createProviderModel(BlogShare, { modelName: 'BlogShare', tab: 'BlogShares' });

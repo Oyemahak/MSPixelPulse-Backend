@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { createProviderModel } from '../providers/providerModel.js';
 
 const fileSchema = new mongoose.Schema(
   {
@@ -13,4 +14,7 @@ const fileSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-export default mongoose.model('File', fileSchema);
+const File = mongoose.model('File', fileSchema);
+export default createProviderModel(File, {
+  modelName: 'File', tab: 'Files', relations: { project: 'Project', uploader: 'User' },
+});

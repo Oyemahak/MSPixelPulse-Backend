@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { createProviderModel } from '../providers/providerModel.js';
 
 const BlogCommentSchema = new mongoose.Schema(
   {
@@ -25,4 +26,7 @@ const BlogCommentSchema = new mongoose.Schema(
 
 BlogCommentSchema.index({ blogSlug: 1, status: 1, createdAt: -1 });
 
-export default mongoose.model("BlogComment", BlogCommentSchema);
+const BlogComment = mongoose.model("BlogComment", BlogCommentSchema);
+export default createProviderModel(BlogComment, {
+  modelName: 'BlogComment', tab: 'BlogComments', defaults: { status: 'pending', emailDeliveryStatus: 'pending' },
+});

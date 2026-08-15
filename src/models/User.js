@@ -1,6 +1,7 @@
 // backend/src/models/User.js
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
+import { createProviderModel } from '../providers/providerModel.js';
 
 const UserSchema = new mongoose.Schema(
   {
@@ -68,4 +69,18 @@ UserSchema.methods.comparePassword = function (plain) {
   return bcrypt.compare(plain, this.password);
 };
 
-export default mongoose.model('User', UserSchema);
+const User = mongoose.model('User', UserSchema);
+export default createProviderModel(User, {
+  modelName: 'User',
+  tab: 'Users',
+  unique: [['email']],
+  defaults: {
+    role: 'client',
+    status: 'pending',
+    accountStatus: 'pending',
+    authVersion: 0,
+    accessApplication: { status: 'pending', requestedRole: 'client' },
+    notificationPreferences: { portalUpdates: true, emailUpdates: true, billingAlerts: true },
+    themePreference: 'dark',
+  },
+});

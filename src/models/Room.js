@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { createProviderModel } from '../providers/providerModel.js';
 const { Schema, Types } = mongoose;
 
 const RoomSchema = new Schema(
@@ -9,4 +10,8 @@ const RoomSchema = new Schema(
   { timestamps: true }
 );
 
-export default mongoose.model('Room', RoomSchema);
+const Room = mongoose.model('Room', RoomSchema);
+export default createProviderModel(Room, {
+  modelName: 'Room', tab: 'Rooms', relations: { project: 'Project' }, unique: [['project']],
+  defaults: { lastMessageAt: null },
+});

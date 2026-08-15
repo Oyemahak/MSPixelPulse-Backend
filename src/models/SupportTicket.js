@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { createProviderModel } from '../providers/providerModel.js';
 
 const AttachmentSchema = new mongoose.Schema(
   {
@@ -43,4 +44,8 @@ const SupportTicketSchema = new mongoose.Schema(
 
 SupportTicketSchema.index({ requester: 1, lastActivityAt: -1 });
 
-export default mongoose.model('SupportTicket', SupportTicketSchema);
+const SupportTicket = mongoose.model('SupportTicket', SupportTicketSchema);
+export default createProviderModel(SupportTicket, {
+  modelName: 'SupportTicket', tab: 'SupportTickets', relations: { requester: 'User' },
+  defaults: { status: 'open', replies: [], lastActivityAt: () => new Date().toISOString() },
+});

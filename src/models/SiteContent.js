@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { createProviderModel } from '../providers/providerModel.js';
 
 export const SITE_CONTENT_KINDS = ['service', 'pricing', 'proof'];
 
@@ -18,4 +19,8 @@ const SiteContentSchema = new mongoose.Schema(
 SiteContentSchema.index({ kind: 1, key: 1 }, { unique: true });
 SiteContentSchema.index({ kind: 1, published: 1, displayOrder: 1 });
 
-export default mongoose.model('SiteContent', SiteContentSchema);
+const SiteContent = mongoose.model('SiteContent', SiteContentSchema);
+export default createProviderModel(SiteContent, {
+  modelName: 'SiteContent', tab: 'SiteContent', unique: [['kind', 'key']],
+  defaults: { payload: {}, published: true, displayOrder: 999, archivedAt: null },
+});

@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { createProviderModel } from '../providers/providerModel.js';
 
 const NotificationLogSchema = new mongoose.Schema(
   {
@@ -24,4 +25,8 @@ const NotificationLogSchema = new mongoose.Schema(
 NotificationLogSchema.index({ dedupeKey: 1 }, { unique: true, sparse: true });
 NotificationLogSchema.index({ createdAt: -1 });
 
-export default mongoose.model("NotificationLog", NotificationLogSchema);
+const NotificationLog = mongoose.model("NotificationLog", NotificationLogSchema);
+export default createProviderModel(NotificationLog, {
+  modelName: 'NotificationLog', tab: 'Notifications', unique: [['dedupeKey']],
+  defaults: { recipients: [], status: 'pending', attemptCount: 0, lastError: '', metadata: {} },
+});

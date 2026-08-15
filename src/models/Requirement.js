@@ -1,5 +1,6 @@
 // backend/src/models/Requirement.js
 import mongoose from "mongoose";
+import { createProviderModel } from '../providers/providerModel.js';
 
 const FileRefSchema = new mongoose.Schema(
   {
@@ -35,4 +36,8 @@ const RequirementSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-export default mongoose.model("Requirement", RequirementSchema);
+const Requirement = mongoose.model("Requirement", RequirementSchema);
+export default createProviderModel(Requirement, {
+  modelName: 'Requirement', tab: 'Requirements', relations: { project: 'Project', client: 'User' },
+  unique: [['project']], defaults: { supporting: [], pages: [], reviewedByDev: false },
+});

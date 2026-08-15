@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { createProviderModel } from '../providers/providerModel.js';
 const { Schema, Types } = mongoose;
 
 const Attachment = new Schema(
@@ -42,4 +43,9 @@ MessageSchema.index({ kind: 1, thread: 1, sentAt: 1 });
 MessageSchema.index({ kind: 1, project: 1, sentAt: 1 });
 MessageSchema.index({ author: 1, readBy: 1, sentAt: -1 });
 
-export default mongoose.model('Message', MessageSchema);
+const Message = mongoose.model('Message', MessageSchema);
+export default createProviderModel(Message, {
+  modelName: 'Message', tab: 'Messages',
+  relations: { author: 'User', project: 'Project', room: 'Room', thread: 'Thread', readBy: 'User' },
+  defaults: { text: '', attachments: [], readBy: [], authorDeleted: false, sentAt: () => new Date().toISOString() },
+});

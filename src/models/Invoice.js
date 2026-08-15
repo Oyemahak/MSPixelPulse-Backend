@@ -1,5 +1,6 @@
 // backend/src/models/Invoice.js
 import mongoose from "mongoose";
+import { createProviderModel } from '../providers/providerModel.js';
 
 const FileRef = new mongoose.Schema(
   { name: String, type: String, size: Number, url: String, path: String },
@@ -43,4 +44,8 @@ const InvoiceSchema = new mongoose.Schema(
 
 InvoiceSchema.index({ project: 1, kind: 1, createdAt: -1 });
 
-export default mongoose.model("Invoice", InvoiceSchema);
+const Invoice = mongoose.model("Invoice", InvoiceSchema);
+export default createProviderModel(Invoice, {
+  modelName: 'Invoice', tab: 'Invoices', relations: { project: 'Project', client: 'User', uploadedBy: 'User' },
+  defaults: { kind: 'advance', status: 'draft', currency: 'CAD', lineItems: [], subtotal: 0, taxAmount: 0, total: 0, isDemo: false },
+});

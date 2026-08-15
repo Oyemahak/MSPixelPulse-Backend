@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { createProviderModel } from '../providers/providerModel.js';
 const { Schema, Types } = mongoose;
 
 const ThreadSchema = new Schema(
@@ -15,4 +16,8 @@ const ThreadSchema = new Schema(
 // Single composite index; remove any duplicate definitions elsewhere.
 ThreadSchema.index({ participants: 1 });
 
-export default mongoose.model("Thread", ThreadSchema);
+const Thread = mongoose.model("Thread", ThreadSchema);
+export default createProviderModel(Thread, {
+  modelName: 'Thread', tab: 'Threads', relations: { participants: 'User' }, unique: [['participantKey']],
+  defaults: { type: 'dm', participants: [], lastMessageAt: null },
+});

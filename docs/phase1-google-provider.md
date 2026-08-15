@@ -1,5 +1,8 @@
 # Google provider layer: Phase 1 handoff
 
+> Historical Phase 1 handoff. The completed migration architecture and current
+> resource IDs are recorded in `docs/google-vercel-migration-2026-08-15.md`.
+
 ## Current data map
 
 | Domain | Current Mongo model / relationship | Phase 1 Sheet tab |

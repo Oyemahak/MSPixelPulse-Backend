@@ -1,11 +1,13 @@
 const PRODUCTION_SPREADSHEET_IDS = [
   '1SUH7tssx4NFj61RzWhXikbDtdLwEuWhkwd4KXeMxVrE',
+  '1HYhsvei9ya9YiKais0eco5LzCPAK7yKhnRPWER932o8',
 ];
 
 const PRODUCTION_DRIVE_ROOT_IDS = [
   '1HarWTMAiRV-4cOP0BErX2--H6Iv16rRe',
   '1HarWTMAiRV-4cOP0BErX2-H6Iv16rRe',
   '1HarWTMAiRV-4cOP0BErX2–H6Iv16rRe',
+  '1MbxPvlPawZfxGGa2ThO7eFcnFN4cTSss',
 ];
 
 function normalizedResourceId(value) {

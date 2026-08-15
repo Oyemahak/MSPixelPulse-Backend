@@ -3,6 +3,8 @@ import { getGoogleApis } from './auth.js';
 import { guardPhase1SpreadsheetId } from './phase1SmokeSafety.js';
 import { withGoogleRetry } from './retry.js';
 
+const sharedRowsCache = new Map();
+
 export const GOOGLE_SHEET_TABS = Object.freeze({
   users: 'Users',
   projects: 'Projects',
@@ -20,6 +22,8 @@ export const GOOGLE_SHEET_TABS = Object.freeze({
   blogShares: 'BlogShares',
   blogSubscribers: 'BlogSubscribers',
   siteContent: 'SiteContent',
+  threads: 'Threads',
+  supportTickets: 'SupportTickets',
 });
 
 function spreadsheetId() {
@@ -44,6 +48,12 @@ function resolveSpreadsheetId(source = spreadsheetId) {
     throw error;
   }
   return guardPhase1SpreadsheetId(resolved);
+}
+
+function rowCacheTtlMs() {
+  const configured = Number(process.env.GOOGLE_SHEETS_CACHE_TTL_MS || 0);
+  if (!Number.isFinite(configured) || configured <= 0) return 0;
+  return Math.min(10 * 60 * 1000, Math.floor(configured));
 }
 
 function quotedSheetName(name) {
@@ -176,6 +186,10 @@ export class GoogleSheetsRepository {
     this.spreadsheet = spreadsheet;
   }
 
+  cacheKey(targetSpreadsheetId = this.resolveSpreadsheetId()) {
+    return `${targetSpreadsheetId}:${this.tab}`;
+  }
+
   resolveSpreadsheetId() {
     return resolveSpreadsheetId(this.spreadsheet);
   }
@@ -191,9 +205,14 @@ export class GoogleSheetsRepository {
   }
 
   async readRows() {
+    const ttl = rowCacheTtlMs();
+    const targetSpreadsheetId = this.resolveSpreadsheetId();
+    const cached = sharedRowsCache.get(this.cacheKey(targetSpreadsheetId));
+    if (ttl && cached?.expiresAt > Date.now()) return cached.value;
+    if (cached) sharedRowsCache.delete(this.cacheKey(targetSpreadsheetId));
     const values = await this.valuesApi();
     const response = await withGoogleRetry(() => values.get({
-      spreadsheetId: this.resolveSpreadsheetId(),
+      spreadsheetId: targetSpreadsheetId,
       range: `${quotedSheetName(this.tab)}!A:ZZ`,
       majorDimension: 'ROWS',
     }));
@@ -202,7 +221,21 @@ export class GoogleSheetsRepository {
     const records = rows.slice(1)
       .map((row, index) => ({ record: recordFromRow(headers, row), rowNumber: index + 2 }))
       .filter(({ record }) => Object.values(record).some((value) => String(value ?? '') !== ''));
-    return { headers, records };
+    const value = { headers, records, nextRowNumber: Math.max(2, rows.length + 1) };
+    this.cacheRows(value, targetSpreadsheetId);
+    return value;
+  }
+
+  cacheRows(value, targetSpreadsheetId = this.resolveSpreadsheetId()) {
+    const ttl = rowCacheTtlMs();
+    const key = this.cacheKey(targetSpreadsheetId);
+    if (ttl) sharedRowsCache.set(key, { value, expiresAt: Date.now() + ttl });
+    else sharedRowsCache.delete(key);
+    return value;
+  }
+
+  invalidateCache(targetSpreadsheetId = this.resolveSpreadsheetId()) {
+    sharedRowsCache.delete(this.cacheKey(targetSpreadsheetId));
   }
 
   async ensureHeaders(additionalHeaders = []) {
@@ -212,7 +245,7 @@ export class GoogleSheetsRepository {
       .filter(Boolean);
     const headers = [...new Set([...current.headers.filter(Boolean), ...requested])];
     if (headers.length === current.headers.length && current.headers.every((value, index) => value === headers[index])) {
-      return { ...current, headers };
+      return this.cacheRows({ ...current, headers });
     }
     const values = await this.valuesApi();
     await withGoogleRetry(() => values.update({
@@ -221,7 +254,7 @@ export class GoogleSheetsRepository {
       valueInputOption: 'RAW',
       requestBody: { values: [headers] },
     }));
-    return { ...current, headers };
+    return this.cacheRows({ ...current, headers });
   }
 
   async findById(id) {
@@ -264,7 +297,8 @@ export class GoogleSheetsRepository {
       error.status = 409;
       throw error;
     }
-    const { headers } = await this.ensureHeaders(Object.keys(record));
+    const current = await this.ensureHeaders(Object.keys(record));
+    const { headers } = current;
     const values = await this.valuesApi();
     await withGoogleRetry(() => values.append({
       spreadsheetId: this.resolveSpreadsheetId(),
@@ -273,6 +307,11 @@ export class GoogleSheetsRepository {
       insertDataOption: 'INSERT_ROWS',
       requestBody: { values: [valuesForHeaders(headers, record)] },
     }));
+    this.cacheRows({
+      headers,
+      records: [...current.records, { record, rowNumber: current.nextRowNumber }],
+      nextRowNumber: current.nextRowNumber + 1,
+    });
     return record;
   }
 
@@ -295,7 +334,8 @@ export class GoogleSheetsRepository {
       }
       seen.add(record[this.idField]);
     }
-    const { headers } = await this.ensureHeaders(prepared.flatMap(Object.keys));
+    const current = await this.ensureHeaders(prepared.flatMap(Object.keys));
+    const { headers } = current;
     const values = await this.valuesApi();
     await withGoogleRetry(() => values.append({
       spreadsheetId: this.resolveSpreadsheetId(),
@@ -304,7 +344,113 @@ export class GoogleSheetsRepository {
       insertDataOption: 'INSERT_ROWS',
       requestBody: { values: prepared.map((record) => valuesForHeaders(headers, record)) },
     }));
+    this.cacheRows({
+      headers,
+      records: [
+        ...current.records,
+        ...prepared.map((record, index) => ({
+          record,
+          rowNumber: current.nextRowNumber + index,
+        })),
+      ],
+      nextRowNumber: current.nextRowNumber + prepared.length,
+    });
     return prepared;
+  }
+
+  /**
+   * Idempotently inserts or replaces records using stable IDs. The existing
+   * tab is read once, existing rows are updated in one batch, and new rows are
+   * appended in one request. This keeps migrations within Google Sheets API
+   * quotas and makes interrupted imports safe to rerun.
+   */
+  async upsertMany(records = []) {
+    if (!Array.isArray(records) || records.length === 0) return [];
+    const now = new Date().toISOString();
+    const seen = new Set();
+    const prepared = records.map((input) => {
+      const id = String(input?.[this.idField] || '').trim();
+      if (!id) {
+        const error = new Error(`${this.idField} is required for ${this.tab} bulk upsert`);
+        error.code = 'GOOGLE_RECORD_ID_REQUIRED';
+        error.status = 400;
+        throw error;
+      }
+      if (seen.has(id)) {
+        const error = new Error(`Duplicate ${this.idField} ${id} in ${this.tab} bulk upsert`);
+        error.code = 'GOOGLE_RECORD_CONFLICT';
+        error.status = 409;
+        throw error;
+      }
+      seen.add(id);
+      return {
+        ...input,
+        [this.idField]: id,
+        createdAt: input.createdAt || now,
+        updatedAt: input.updatedAt || now,
+      };
+    });
+
+    const before = await this.readRows();
+    const currentById = new Map(before.records.map((entry) => [
+      String(entry.record[this.idField]),
+      entry,
+    ]));
+    const merged = prepared.map((record) => {
+      const current = currentById.get(record[this.idField]);
+      return current
+        ? { ...current.record, ...record, [this.idField]: record[this.idField] }
+        : record;
+    });
+    const withHeaders = await this.ensureHeaders(merged.flatMap(Object.keys));
+    const { headers } = withHeaders;
+    const values = await this.valuesApi();
+    const updates = [];
+    const inserts = [];
+
+    for (const record of merged) {
+      const current = currentById.get(record[this.idField]);
+      if (current) {
+        updates.push({
+          range: `${quotedSheetName(this.tab)}!A${current.rowNumber}:${columnName(headers.length - 1)}${current.rowNumber}`,
+          values: [valuesForHeaders(headers, record)],
+        });
+      } else {
+        inserts.push(record);
+      }
+    }
+
+    if (updates.length) {
+      await withGoogleRetry(() => values.batchUpdate({
+        spreadsheetId: this.resolveSpreadsheetId(),
+        requestBody: { valueInputOption: 'RAW', data: updates },
+      }));
+    }
+    if (inserts.length) {
+      await withGoogleRetry(() => values.append({
+        spreadsheetId: this.resolveSpreadsheetId(),
+        range: `${quotedSheetName(this.tab)}!A:ZZ`,
+        valueInputOption: 'RAW',
+        insertDataOption: 'INSERT_ROWS',
+        requestBody: { values: inserts.map((record) => valuesForHeaders(headers, record)) },
+      }));
+    }
+
+    const migratedById = new Map(merged.map((record) => [record[this.idField], record]));
+    const existingRecords = withHeaders.records.map((entry) => {
+      const replacement = migratedById.get(String(entry.record[this.idField]));
+      return replacement ? { ...entry, record: replacement } : entry;
+    });
+    const nextRowNumber = withHeaders.nextRowNumber;
+    this.cacheRows({
+      headers,
+      records: [
+        ...existingRecords,
+        ...inserts.map((record, index) => ({ record, rowNumber: nextRowNumber + index })),
+      ],
+      nextRowNumber: nextRowNumber + inserts.length,
+    });
+    return merged;
   }
 
   async update(id, patch = {}) {
@@ -330,6 +476,13 @@ export class GoogleSheetsRepository {
       valueInputOption: 'RAW',
       requestBody: { values: [valuesForHeaders(headers, record)] },
     }));
+    this.cacheRows({
+      headers,
+      records: records.map((entry) => (
+        entry.rowNumber === target.rowNumber ? { ...entry, record } : entry
+      )),
+      nextRowNumber: Math.max(2, ...records.map((entry) => entry.rowNumber + 1)),
+    });
     return record;
   }
 
@@ -364,7 +517,59 @@ export class GoogleSheetsRepository {
         }],
       },
     }));
+    const current = await this.readRows();
+    this.cacheRows({
+      ...current,
+      records: current.records
+        .filter((entry) => entry.rowNumber !== target.rowNumber)
+        .map((entry) => (
+          entry.rowNumber > target.rowNumber
+            ? { ...entry, rowNumber: entry.rowNumber - 1 }
+            : entry
+        )),
+      nextRowNumber: Math.max(2, current.nextRowNumber - 1),
+    });
     return true;
+  }
+
+
+  async deleteMany(ids = []) {
+    const wanted = new Set((ids || []).map(String).filter(Boolean));
+    if (!wanted.size) return 0;
+    const { records } = await this.readRows();
+    const targets = records
+      .filter(({ record }) => wanted.has(String(record[this.idField])))
+      .sort((left, right) => right.rowNumber - left.rowNumber);
+    if (!targets.length) return 0;
+    const sheets = await this.sheetApi();
+    const metadata = await withGoogleRetry(() => sheets.get({
+      spreadsheetId: this.resolveSpreadsheetId(),
+      fields: 'sheets.properties',
+    }));
+    const sheet = (metadata.data.sheets || []).find((item) => item.properties?.title === this.tab);
+    if (!sheet) {
+      const error = new Error(`Sheet tab ${this.tab} was not found`);
+      error.code = 'GOOGLE_SHEET_TAB_NOT_FOUND';
+      error.status = 404;
+      throw error;
+    }
+    await withGoogleRetry(() => sheets.batchUpdate({
+      spreadsheetId: this.resolveSpreadsheetId(),
+      requestBody: {
+        requests: targets.map((target) => ({
+          deleteDimension: {
+            range: {
+              sheetId: sheet.properties.sheetId,
+              dimension: 'ROWS',
+              startIndex: target.rowNumber - 1,
+              endIndex: target.rowNumber,
+            },
+          },
+        })),
+      },
+    }));
+    this.invalidateCache();
+    return targets.length;
   }
 }
 
@@ -374,4 +579,5 @@ export const sheetsInternals = {
   stableCellValue,
   matchesFilter,
   resolveSpreadsheetId,
+  rowCacheTtlMs,
 };

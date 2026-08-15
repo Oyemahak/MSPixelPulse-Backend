@@ -10,6 +10,8 @@ import {
   canReadProject,
   projectAccessError,
 } from "../../../lib/projectAccess.js";
+import { googleFilesRepository } from '../../../repositories/files.repository.js';
+import { storageProviderName } from '../../../config/providers.js';
 
 /**
  * Multer keeps files in memory so we can stream to Supabase.
@@ -101,6 +103,57 @@ export async function upsertRequirement(req, res) {
       }, {})
     : (req.files || {});
 
+  let uploadedFiles = {};
+  try {
+    uploadedFiles = typeof req.body?.uploadedFiles === 'string'
+      ? JSON.parse(req.body.uploadedFiles || '{}')
+      : (req.body?.uploadedFiles || {});
+  } catch {
+    return res.status(400).json({ message: 'uploadedFiles must be valid JSON' });
+  }
+
+  async function verifiedDirectRef(ref) {
+    if (!ref?.path || storageProviderName() !== 'google-drive') return null;
+    const record = await googleFilesRepository.findOne({ logicalPath: String(ref.path) });
+    if (
+      !record ||
+      String(record.projectId || '') !== String(projectId) ||
+      String(record.uploadedBy || '') !== String(me?._id || '') ||
+      String(record.category || '') !== 'requirements' ||
+      !String(record.logicalPath || '').startsWith(`projects/${projectId}/requirements/`)
+    ) return null;
+    return {
+      name: String(record.originalName || record.storedName || 'file'),
+      type: String(record.mimeType || 'application/octet-stream'),
+      size: Number(record.size || 0),
+      path: String(record.logicalPath),
+      url: await createSignedUrl(record.logicalPath),
+    };
+  }
+
+  async function verifiedDirectList(list) {
+    const output = [];
+    for (const ref of Array.isArray(list) ? list : []) {
+      const verified = await verifiedDirectRef(ref);
+      if (!verified) return null;
+      output.push(verified);
+    }
+    return output;
+  }
+
+  const direct = { pageFiles: {} };
+  if (uploadedFiles.logo) direct.logo = await verifiedDirectRef(uploadedFiles.logo);
+  if (uploadedFiles.brief) direct.brief = await verifiedDirectRef(uploadedFiles.brief);
+  direct.supporting = await verifiedDirectList(uploadedFiles.supporting || []);
+  if ((uploadedFiles.logo && !direct.logo) || (uploadedFiles.brief && !direct.brief) || direct.supporting === null) {
+    return res.status(403).json({ message: 'One or more uploaded requirement files are not authorized' });
+  }
+  for (const [pageName, refs] of Object.entries(uploadedFiles.pageFiles || {})) {
+    const verified = await verifiedDirectList(refs);
+    if (verified === null) return res.status(403).json({ message: 'One or more uploaded requirement files are not authorized' });
+    direct.pageFiles[pageName] = verified;
+  }
+
   const norm = (s) => cleanText(s, 120);
   const keyOf = (s) => norm(s).toLowerCase();
 
@@ -121,7 +174,13 @@ export async function upsertRequirement(req, res) {
 
   // Parse incoming pages meta
   let pagesMeta = [];
-  try { pagesMeta = JSON.parse(String(req.body.pages || "[]")); } catch { pagesMeta = []; }
+  try {
+    pagesMeta = Array.isArray(req.body.pages)
+      ? req.body.pages
+      : JSON.parse(String(req.body.pages || "[]"));
+  } catch {
+    pagesMeta = [];
+  }
 
   // Load current doc or create new
   const current =
@@ -135,10 +194,16 @@ export async function upsertRequirement(req, res) {
   if (filesByField?.logo?.[0]) {
     if (next.logo?.path) replacedPaths.push(next.logo.path);
     next.logo = await put(filesByField.logo[0], "core/logo");
+  } else if (direct.logo) {
+    if (next.logo?.path) replacedPaths.push(next.logo.path);
+    next.logo = direct.logo;
   }
   if (filesByField?.brief?.[0]) {
     if (next.brief?.path) replacedPaths.push(next.brief.path);
     next.brief = await put(filesByField.brief[0], "core/brief");
+  } else if (direct.brief) {
+    if (next.brief?.path) replacedPaths.push(next.brief.path);
+    next.brief = direct.brief;
   }
 
   // Supporting docs (append)
@@ -146,6 +211,11 @@ export async function upsertRequirement(req, res) {
     const uploaded = [];
     for (const f of filesByField.supporting) uploaded.push(await put(f, "supporting"));
     next.supporting = Array.isArray(next.supporting) ? [...next.supporting, ...uploaded] : uploaded;
+  }
+  if (direct.supporting?.length) {
+    next.supporting = Array.isArray(next.supporting)
+      ? [...next.supporting, ...direct.supporting]
+      : direct.supporting;
   }
 
   // Per-page uploads keyed by field name pageFiles[<Name>]
@@ -159,6 +229,10 @@ export async function upsertRequirement(req, res) {
       if (!perPageUploads[pageName]) perPageUploads[pageName] = [];
       perPageUploads[pageName].push(ref);
     }
+  }
+  for (const [pageName, refs] of Object.entries(direct.pageFiles)) {
+    if (!perPageUploads[pageName]) perPageUploads[pageName] = [];
+    perPageUploads[pageName].push(...refs);
   }
 
   // Build existing map (case-insensitive key)

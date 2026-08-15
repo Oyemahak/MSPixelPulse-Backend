@@ -32,6 +32,21 @@ test('Google Sheets repositories resolve the spreadsheet environment at request 
   }
 });
 
+test('Google Sheets row caching is opt-in and bounded', () => {
+  const original = process.env.GOOGLE_SHEETS_CACHE_TTL_MS;
+  try {
+    delete process.env.GOOGLE_SHEETS_CACHE_TTL_MS;
+    assert.equal(sheetsInternals.rowCacheTtlMs(), 0);
+    process.env.GOOGLE_SHEETS_CACHE_TTL_MS = '300000';
+    assert.equal(sheetsInternals.rowCacheTtlMs(), 300000);
+    process.env.GOOGLE_SHEETS_CACHE_TTL_MS = '999999999';
+    assert.equal(sheetsInternals.rowCacheTtlMs(), 600000);
+  } finally {
+    if (original === undefined) delete process.env.GOOGLE_SHEETS_CACHE_TTL_MS;
+    else process.env.GOOGLE_SHEETS_CACHE_TTL_MS = original;
+  }
+});
+
 test('blank test spreadsheets initialize required tabs against only the injected target', async () => {
   const targetSpreadsheetId = 'isolated-phase1-sheet';
   const requiredTabs = ['Users', 'Projects'];
@@ -70,4 +85,36 @@ test('blank test spreadsheets initialize required tabs against only the injected
   assert.deepEqual(requiredTabs.every((tab) => result.existingTabs.includes(tab)), true);
   assert.deepEqual(calls.map((call) => call.operation), ['get', 'batchUpdate', 'get']);
   assert.deepEqual(calls.every((call) => call.spreadsheetId === targetSpreadsheetId), true);
+});
+
+test('bulk upsert updates existing stable IDs and appends new IDs without per-record reads', async () => {
+  const calls = [];
+  const repository = new GoogleSheetsRepository('Users', { spreadsheet: 'migration-sheet' });
+  const current = {
+    headers: ['id', 'createdAt', 'updatedAt', 'name'],
+    records: [{
+      rowNumber: 2,
+      record: { id: 'existing', createdAt: '2026-01-01', updatedAt: '2026-01-01', name: 'Before' },
+    }],
+    nextRowNumber: 3,
+  };
+  repository.readRows = async () => current;
+  repository.ensureHeaders = async () => current;
+  repository.valuesApi = async () => ({
+    async batchUpdate(input) { calls.push({ operation: 'batchUpdate', input }); },
+    async append(input) { calls.push({ operation: 'append', input }); },
+  });
+  repository.cacheRows = (value) => value;
+
+  const result = await repository.upsertMany([
+    { id: 'existing', createdAt: '2026-01-01', updatedAt: '2026-02-01', name: 'After' },
+    { id: 'new', createdAt: '2026-02-01', updatedAt: '2026-02-01', name: 'New' },
+  ]);
+
+  assert.deepEqual(result.map((record) => record.id), ['existing', 'new']);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].operation, 'batchUpdate');
+  assert.equal(calls[0].input.requestBody.data[0].range, "'Users'!A2:D2");
+  assert.equal(calls[1].operation, 'append');
+  assert.equal(calls[1].input.requestBody.values.length, 1);
 });
