@@ -9,57 +9,93 @@ import {
 
 export class UsersRepository {
   constructor() {
-    this.google = new GoogleSheetsRepository(
-      GOOGLE_SHEET_TABS.users,
-    );
+    this.google =
+      new GoogleSheetsRepository(
+        GOOGLE_SHEET_TABS.users,
+      );
   }
 
-  async findById(id) {
+  async findById(
+    id,
+    {
+      fresh = false,
+    } = {},
+  ) {
     return this.present(
-      await this.google.findById(id),
+      await this.google.findById(
+        id,
+        {
+          fresh,
+        },
+      ),
     );
   }
 
   async list(options) {
     const result =
-      await this.google.list(options);
+      await this.google.list(
+        options,
+      );
 
     return {
       ...result,
-      items: result.items.map((item) =>
-        this.present(item),
-      ),
+
+      items:
+        result.items.map(
+          (item) =>
+            this.present(
+              item,
+            ),
+        ),
     };
   }
 
-  async update(id, patch) {
+  async update(
+    id,
+    patch,
+  ) {
     return this.present(
-      await this.google.update(id, patch),
+      await this.google.update(
+        id,
+        patch,
+      ),
     );
   }
 
   delete(id) {
-    return this.google.delete(id);
+    return this.google.delete(
+      id,
+    );
   }
 
-  async findByEmail(email) {
-    const normalized = String(email || '')
-      .trim()
-      .toLowerCase();
+  async findByEmail(
+    email,
+  ) {
+    const normalized =
+      String(
+        email || '',
+      )
+        .trim()
+        .toLowerCase();
 
     const user =
       await this.google.findOne(
         {
-          email: normalized,
+          email:
+            normalized,
         },
         {
           fresh: true,
         },
       );
 
-    return this.present(user, {
-      credentials: true,
-    });
+    return this.present(
+      user,
+      {
+        credentials:
+          true,
+      },
+    );
   }
 
   async create({
@@ -67,11 +103,12 @@ export class UsersRepository {
     passwordHash,
     ...input
   } = {}) {
-    const email = String(
-      input.email || '',
-    )
-      .trim()
-      .toLowerCase();
+    const email =
+      String(
+        input.email || '',
+      )
+        .trim()
+        .toLowerCase();
 
     const existing =
       await this.google.findOne(
@@ -84,9 +121,10 @@ export class UsersRepository {
       );
 
     if (existing) {
-      const error = new Error(
-        'A user with this email already exists',
-      );
+      const error =
+        new Error(
+          'A user with this email already exists',
+        );
 
       error.code =
         'USER_EMAIL_CONFLICT';
@@ -101,16 +139,19 @@ export class UsersRepository {
       (
         password
           ? await bcrypt.hash(
-              String(password),
+              String(
+                password,
+              ),
               10,
             )
           : ''
       );
 
     if (!hash) {
-      const error = new Error(
-        'passwordHash is required for a Google user record',
-      );
+      const error =
+        new Error(
+          'passwordHash is required for a Google user record',
+        );
 
       error.code =
         'PASSWORD_HASH_REQUIRED';
@@ -124,10 +165,13 @@ export class UsersRepository {
       await this.google.create({
         ...input,
         email,
-        passwordHash: hash,
+        passwordHash:
+          hash,
       });
 
-    return this.present(created);
+    return this.present(
+      created,
+    );
   }
 
   async verifyCredentials(
@@ -135,7 +179,9 @@ export class UsersRepository {
     password,
   ) {
     const user =
-      await this.findByEmail(email);
+      await this.findByEmail(
+        email,
+      );
 
     if (!user) {
       return null;
@@ -150,7 +196,9 @@ export class UsersRepository {
 
     const valid =
       await bcrypt.compare(
-        String(password || ''),
+        String(
+          password || '',
+        ),
         hash,
       );
 
@@ -161,7 +209,10 @@ export class UsersRepository {
     return user;
   }
 
-  async setPassword(id, password) {
+  async setPassword(
+    id,
+    password,
+  ) {
     const current =
       await this.google.findById(
         id,
@@ -176,7 +227,8 @@ export class UsersRepository {
 
     const nextAuthVersion =
       Number(
-        current.authVersion || 0,
+        current.authVersion ||
+          0,
       ) + 1;
 
     const updated =
@@ -185,7 +237,9 @@ export class UsersRepository {
         {
           passwordHash:
             await bcrypt.hash(
-              String(password),
+              String(
+                password,
+              ),
               10,
             ),
 
@@ -197,7 +251,9 @@ export class UsersRepository {
         },
       );
 
-    return this.present(updated);
+    return this.present(
+      updated,
+    );
   }
 
   present(
@@ -212,6 +268,7 @@ export class UsersRepository {
 
     const user = {
       ...value,
+
       _id:
         value._id ||
         value.id,
@@ -241,7 +298,8 @@ export class UsersRepository {
 
     user.authVersion =
       Number(
-        user.authVersion || 0,
+        user.authVersion ||
+          0,
       );
 
     if (
