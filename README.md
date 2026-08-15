@@ -4,37 +4,37 @@ Official MSPixelPulse backend API for authentication, users, agency projects, cl
 
 ## Architecture
 
-- MongoDB Atlas with Mongoose is the current default application database.
-- Users and authentication data live in MongoDB.
-- Business data such as projects, messages, requirements, invoices, and leads live in MongoDB.
-- Supabase is the current default file-storage provider.
-- Phase 1 adds opt-in Google Sheets repositories and Google Drive storage behind environment-controlled providers; no data migration is included.
-- Render hosts the Express backend.
+- Google Sheets is the production application database.
+- Google Drive is the production file-storage provider.
+- Mongoose schemas remain as a temporary controller-compatibility façade; the Google provider is the configured production data source.
+- Vercel hosts the API and frontend.
 - Vercel hosts the React frontend.
 - Authentication is custom JWT auth with Authorization header support and an HTTP-only cookie.
 
 ## Stack
 
 - Node.js and Express
-- MongoDB Atlas and Mongoose
+- Google Sheets and Google Drive
+- Mongoose compatibility façade
 - JSON Web Tokens
-- Supabase Storage, private bucket preferred
+- Google OAuth2 with refresh-token authentication
 - Multer memory uploads
 - Socket.IO
-- Render deployment
+- Vercel deployment
 
 ## Folder Structure
 
 - `src/app.js` - Express app, middleware, health endpoints, API mounting
-- `src/server.js` - boot process, MongoDB connection, HTTP and Socket.IO server
-- `src/config/` - environment, CORS, MongoDB helpers
+- `src/server.js` - local HTTP boot process and optional legacy Mongo compatibility connection
+- `api/index.js` - Vercel serverless Express entrypoint
+- `src/config/` - environment, CORS, providers, and optional Mongo compatibility helpers
 - `src/features/` - feature controllers and routes
 - `src/models/` - Mongoose schemas
 - `src/google/` - OAuth, Sheets, Drive, and bounded retry utilities
 - `src/repositories/` - provider-neutral domain repositories
-- `src/storage/` - Supabase and Google Drive storage adapters
+- `src/storage/` - Google Drive storage provider and storage interface
 - `src/middleware/` - auth, roles, error handling
-- `src/lib/` - Supabase/storage and health helpers
+- `src/lib/` - storage, file-policy, authorization, and health helpers
 - `src/scripts/` - seed and maintenance scripts
 
 ## Setup
@@ -48,7 +48,7 @@ npm run dev
 Local API default:
 
 ```text
-http://localhost:5000
+http://localhost:4000
 ```
 
 ## Environment Variables
@@ -59,28 +59,18 @@ Required for normal operation:
 
 ```text
 NODE_ENV=development
-PORT=5000
-MONGO_URI=mongodb+srv://USERNAME:PASSWORD@HOST/DATABASE
+PORT=4000
 JWT_SECRET=replace-with-long-random-secret
 JWT_EXPIRES_IN=7d
 CORS_ORIGIN=http://localhost:5173,https://mspixelpulse.com,https://www.mspixelpulse.com
 COOKIE_SECURE=false
 ```
 
-Required for file uploads:
+Required production provider configuration:
 
 ```text
-SUPABASE_URL=https://PROJECT_REF.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=replace-with-server-secret
-SUPABASE_BUCKET=uploads
-```
-
-Optional Phase 1 Google provider configuration (defaults preserve the current
-MongoDB/Supabase production path):
-
-```text
-DATA_PROVIDER=mongodb
-STORAGE_PROVIDER=supabase
+DATA_PROVIDER=google
+STORAGE_PROVIDER=google-drive
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
 GOOGLE_REFRESH_TOKEN=
@@ -90,8 +80,8 @@ GOOGLE_DRIVE_CLIENT_FILES_FOLDER_ID=
 GOOGLE_DRIVE_PROJECT_FILES_FOLDER_ID=
 ```
 
-See [`docs/phase1-google-provider.md`](docs/phase1-google-provider.md) for the
-data map, safe smoke-test contract, Vercel limitation, and Phase 2 sequence.
+See [`docs/google-vercel-migration-2026-08-15.md`](docs/google-vercel-migration-2026-08-15.md)
+for the verified Google migration record and recovery notes.
 
 Required for contact and blog notification email:
 
@@ -111,7 +101,7 @@ Production super-admin seed:
 
 ```text
 SUPER_ADMIN_EMAIL=mahakpateluiux@gmail.com
-SUPER_ADMIN_PASSWORD=replace-with-render-secret
+SUPER_ADMIN_PASSWORD=replace-with-secure-secret
 SUPER_ADMIN_NAME=Mahak Patel
 ```
 
@@ -122,27 +112,19 @@ ENABLE_DEBUG_ROUTES=false
 DEBUG_ROUTE_KEY=
 ```
 
-## MongoDB
+## Google persistence
 
-MongoDB Atlas is required in production. If MongoDB cannot connect, the backend exits instead of running partially. Startup logs use sanitized error categories only.
-
-## Supabase Storage
-
-Supabase is storage only. Do not migrate authentication or database records to Supabase.
-
-Use a private bucket named:
-
-```text
-uploads
-```
-
-If Supabase variables are missing, the API still starts, login still works, and upload endpoints return a controlled `503` response.
+Production must use `DATA_PROVIDER=google` and `STORAGE_PROVIDER=google-drive`.
+Google Sheets records use stable IDs, never row numbers. Google Drive files are
+private and referenced by Drive file IDs plus logical metadata in the `Files`
+sheet. OAuth failures surface as controlled storage/configuration errors rather
+than switching to another provider.
 
 ## Authentication Flow
 
 1. Frontend posts to `POST /api/auth/login`.
 2. Backend normalizes the email with `trim().toLowerCase()`.
-3. The current default loads the user from MongoDB; controlled Google testing uses the Users repository and `passwordHash` in the Users Sheet.
+3. The Users repository reads `passwordHash` from the Users Sheet.
 4. Password is verified with bcrypt.
 5. Active users receive a JWT.
 6. Frontend stores the token and redirects by role.
@@ -177,18 +159,19 @@ Demo-safe accounts should be created with environment-provided passwords only. D
 Health endpoints are public and safe:
 
 ```bash
-curl https://capstone-backend-o3o2.onrender.com/health
-curl https://capstone-backend-o3o2.onrender.com/api/health
+curl https://api.mspixelpulse.com/health
+curl https://api.mspixelpulse.com/api/health
 ```
 
-They report process status, environment, uptime, MongoDB state, and whether Supabase/storage config is present. They do not expose hosts, connection strings, keys, passwords, or tokens.
+They report process status, environment, uptime, the selected providers, and
+Google Drive configuration without exposing hosts, keys, passwords, or tokens.
 
 ## Seed Commands
 
 Protected production super admin:
 
 ```bash
-SUPER_ADMIN_EMAIL='mahakpateluiux@gmail.com' SUPER_ADMIN_PASSWORD='set-in-render' SUPER_ADMIN_NAME='Mahak Patel' npm run seed:super-admin
+SUPER_ADMIN_EMAIL='mahakpateluiux@gmail.com' SUPER_ADMIN_PASSWORD='set-secure-value' SUPER_ADMIN_NAME='Mahak Patel' npm run seed:super-admin
 ```
 
 Portal demo users and sample invoice:
@@ -207,54 +190,33 @@ npm run seed:demo
 
 Seed commands are idempotent and do not log passwords. Use demo seeds for local/dev or controlled production preview data only.
 
-## Dummy Data Cleanup
+## Vercel Deployment
 
-Dry-run only:
-
-```bash
-npm run cleanup:dummy:dry
-```
-
-Confirmed cleanup:
-
-```bash
-npm run cleanup:dummy
-```
-
-The confirmed cleanup requires the script's `--confirm` flag, creates a JSON backup under the OS temp directory, and currently deletes only matched standalone lead records. Matched users and relational records are reported but preserved for manual review to avoid orphaned references. Review the dry-run output before running cleanup.
-
-Storage dry-run:
-
-```bash
-npm run cleanup:storage:dry
-```
-
-## Render Deployment
-
-Production Render variables should include:
+Production Vercel variables include:
 
 ```text
 NODE_ENV=production
-MONGO_URI
 JWT_SECRET
 JWT_EXPIRES_IN=7d
-CORS_ORIGIN=https://mspixelpulse.com,https://www.mspixelpulse.com,https://mspixelpulse.vercel.app
+CORS_ORIGIN=https://mspixelpulse.com,https://www.mspixelpulse.com
 COOKIE_SECURE=true
-SUPABASE_URL
-SUPABASE_SERVICE_ROLE_KEY
-SUPABASE_BUCKET=uploads
-SUPER_ADMIN_EMAIL
-SUPER_ADMIN_PASSWORD
-SUPER_ADMIN_NAME
+DATA_PROVIDER=google
+STORAGE_PROVIDER=google-drive
+GOOGLE_CLIENT_ID
+GOOGLE_CLIENT_SECRET
+GOOGLE_REFRESH_TOKEN
+GOOGLE_DATABASE_SPREADSHEET_ID
+GOOGLE_DRIVE_ROOT_FOLDER_ID
+GOOGLE_DRIVE_CLIENT_FILES_FOLDER_ID
+GOOGLE_DRIVE_PROJECT_FILES_FOLDER_ID
 ```
 
 Do not overwrite real dashboard secrets with placeholder values.
 
 ## Troubleshooting
 
-- Login fails with network errors: check Render service health and `/health`.
-- Health says MongoDB disconnected: check Atlas URI, Atlas network access, and database user.
-- Uploads return `503`: check Supabase URL, server secret key, and `SUPABASE_BUCKET=uploads`.
+- Login fails with network errors: check the Vercel API health endpoint and `/health`.
+- Uploads return `503`: check the server-only Google OAuth and Drive environment variables.
 - CORS errors: confirm `CORS_ORIGIN` includes the exact frontend origin. The canonical public origin is `https://mspixelpulse.com`.
 - Invalid credentials: seed the expected admin/demo users or confirm the account is active.
 
@@ -263,4 +225,3 @@ Do not overwrite real dashboard secrets with placeholder values.
 - Never commit `.env`, cookies, keys, tokens, dumps, or backups.
 - Rotate secrets if they were ever committed to Git history.
 - Debug routes require `ENABLE_DEBUG_ROUTES=true` and, in production, `x-debug-key`.
-- Keep Supabase service keys on the backend only.

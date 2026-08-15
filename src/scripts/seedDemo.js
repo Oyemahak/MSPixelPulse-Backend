@@ -1,6 +1,6 @@
 import 'dotenv/config';
-import mongoose from 'mongoose';
 import User from '../models/User.js';
+import { dataProviderName } from '../config/providers.js';
 
 const FIXTURES = [
   {
@@ -27,8 +27,7 @@ const FIXTURES = [
 ];
 
 async function main() {
-  if (!process.env.MONGO_URI) throw new Error('MONGO_URI missing');
-  await mongoose.connect(process.env.MONGO_URI);
+  if (dataProviderName() !== 'google') throw new Error('seed:demo requires DATA_PROVIDER=google');
 
   const results = [];
   for (const fixture of FIXTURES) {
@@ -67,6 +66,3 @@ main()
     console.error('Seed demo failed:', err.code || err.message);
     process.exitCode = 1;
   })
-  .finally(async () => {
-    await mongoose.disconnect().catch(() => {});
-  });

@@ -12,10 +12,10 @@
 - [UX Writing Agent](agents/ux-writing-agent.md): Make interface words clear, actionable, consistent, accessible, and honest.
 - [Frontend Agent](agents/frontend-agent.md): Implement and review frontend work while preserving existing architecture, routes, accessibility, API contracts, and responsive behavior.
 - [Backend Agent](agents/backend-agent.md): Implement and review backend reliability, routes, controllers, middleware, validation, health checks, logging, and startup behavior.
-- [Database Agent](agents/database-agent.md): Protect MongoDB data quality, schemas, indexes, relationships, backups, seed safety, and deletion behavior.
+- [Database Agent](agents/database-agent.md): Protect Google Sheets data quality, stable IDs, relationships, backups, seed safety, and deletion behavior.
 - [API Agent](agents/api-agent.md): Protect API contracts, request/response shapes, validation, errors, pagination, authorization, and frontend compatibility.
 - [Authentication/Security Agent](agents/authentication-security-agent.md): Review authentication, authorization, secrets, CORS, cookies, JWT, debug routes, uploads, dependencies, and admin actions.
-- [Storage Agent](agents/storage-agent.md): Review Supabase Storage use for private files, path safety, signed URLs, deletion, authorization, cleanup, and provider limits.
+- [Storage Agent](agents/storage-agent.md): Review Google Drive storage use for private files, path safety, signed/proxied URLs, deletion, authorization, cleanup, and provider limits.
 - [Performance Agent](agents/performance-agent.md): Improve speed, bundle weight, runtime efficiency, database query behavior, and Core Web Vitals without premature complexity.
 - [Accessibility Agent](agents/accessibility-agent.md): Review against WCAG 2.2 AA where practical and separate automated checks from manual limitations.
 - [QA Agent](agents/qa-agent.md): Validate requirements, end-to-end flows, permissions, error states, data integrity, and production behavior.

@@ -21,7 +21,7 @@ This is the required entry point for Codex and future AI coding agents working i
 - Complete handoff documentation for future agents.
 
 ## Repository Focus
-Node/Express backend, MongoDB Atlas data, JWT authentication, Supabase Storage, Render deployment, and API reliability.
+Node/Express API, Google Sheets data, Google Drive storage, JWT authentication, Vercel deployment, and API reliability.
 
 ## Completion Evidence
 Final responses should include files changed, checks run, risks, unresolved items, and next steps.

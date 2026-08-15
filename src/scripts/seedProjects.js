@@ -1,7 +1,7 @@
 import 'dotenv/config';
-import connectDB from '../config/db.js';
 import Project from '../models/Project.js';
 import { portfolioProjects } from '../data/portfolioProjects.js';
+import { dataProviderName } from '../config/providers.js';
 
 const FORCE = process.env.PORTFOLIO_FORCE === 'true';
 const EXCLUDED_REPOSITORIES = new Set([
@@ -100,8 +100,7 @@ function buildPatch(existing, project) {
 }
 
 async function run() {
-  await connectDB();
-  await Project.createIndexes();
+  if (dataProviderName() !== 'google') throw new Error('seed:projects requires DATA_PROVIDER=google');
 
   const report = {
     imported: 0,
@@ -155,7 +154,6 @@ async function run() {
   }
 
   console.log(JSON.stringify(report, null, 2));
-  await Project.db.close();
 }
 
 run().catch((error) => {

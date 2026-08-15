@@ -2,7 +2,7 @@
 import Project from '../../../models/Project.js';
 import Requirement from '../../../models/Requirement.js';
 import { cleanPublicUrl, cleanText } from '../../../lib/validation.js';
-import { createSignedUrl, removePath } from '../../../lib/supabase.js';
+import { signedURL as createSignedUrl, removeObject as removePath } from '../../../lib/storage.js';
 import { pathBelongsToProjectPurpose } from '../../../lib/filePolicy.js';
 import {
   canReadProject,

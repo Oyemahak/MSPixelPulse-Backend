@@ -2,6 +2,7 @@
 
 > Historical Phase 1 handoff. The completed migration architecture and current
 > resource IDs are recorded in `docs/google-vercel-migration-2026-08-15.md`.
+> It must not be used as current provider, deployment, or rollback guidance.
 
 ## Current data map
 

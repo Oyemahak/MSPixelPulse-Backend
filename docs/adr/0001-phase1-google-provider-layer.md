@@ -2,7 +2,11 @@
 
 ## Status
 
-Accepted for Phase 1 preparation. No production provider switch or data migration is authorized by this decision.
+Superseded by the completed Google/Vercel cutover record in
+`docs/google-vercel-migration-2026-08-15.md`.
+
+> Historical decision record only. Its Phase 1 flags, MongoDB/Supabase, and
+> Render guidance must not be used for the current production deployment.
 
 ## Context
 

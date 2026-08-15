@@ -1,23 +1,33 @@
 import { mongoState } from "../config/db.js";
+import { providerStatus } from "../config/providers.js";
+import { storageProviderStatus } from "../storage/provider.js";
 import { mailerStatus } from "./mailer.js";
-import { storageStatus } from "./supabase.js";
-import { providerStatus } from '../config/providers.js';
 
 export function healthPayload() {
-  const storage = storageStatus();
+  const storage = storageProviderStatus();
   const email = mailerStatus();
-  return {
+  const providers = providerStatus();
+
+  const payload = {
     success: true,
     service: "mspixelpulse-api",
     environment: process.env.NODE_ENV || "development",
     timestamp: new Date().toISOString(),
     uptime: Math.round(process.uptime()),
-    mongodb: {
-      state: mongoState(),
-      connected: mongoState() === "connected",
-    },
-    providers: providerStatus(),
+
+    providers,
     storage,
     email,
   };
+
+  // Mongoose schemas remain as the controller compatibility façade, but
+  // Google production intentionally has no MongoDB connection to report.
+  if (providers.data === 'mongodb') {
+    payload.mongodb = {
+      state: mongoState(),
+      connected: mongoState() === 'connected',
+    };
+  }
+
+  return payload;
 }

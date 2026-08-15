@@ -17,7 +17,7 @@ const PURPOSES = {
     extensions: new Set(['.jpg', '.jpeg', '.png', '.webp']),
   },
   avatar: {
-    maxBytes: 5 * 1024 * 1024,
+    maxBytes: 4 * 1024 * 1024,
     mimeTypes: new Set(['image/jpeg', 'image/png', 'image/webp']),
     extensions: new Set(['.jpg', '.jpeg', '.png', '.webp']),
   },

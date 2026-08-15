@@ -2,7 +2,7 @@
 import multer from "multer";
 import Requirement from "../../../models/Requirement.js";
 import Project from "../../../models/Project.js";
-import { createSignedUrl, removePaths, uploadBuffer } from "../../../lib/supabase.js";
+import { signedURL as createSignedUrl, removeObjects as removePaths, putObject } from "../../../lib/storage.js";
 import { cleanFileName, validateUpload } from "../../../lib/filePolicy.js";
 import { cleanText } from "../../../lib/validation.js";
 import {
@@ -14,7 +14,7 @@ import { googleFilesRepository } from '../../../repositories/files.repository.js
 import { storageProviderName } from '../../../config/providers.js';
 
 /**
- * Multer keeps files in memory so we can stream to Supabase.
+ * Multer keeps legacy multipart files in memory before passing them to the configured storage provider.
  */
 export const memUpload = multer({
   storage: multer.memoryStorage(),
@@ -161,13 +161,18 @@ export async function upsertRequirement(req, res) {
     if (!one) return null;
     const original = cleanFileName(one.originalname || "file");
     const path = `projects/${projectId}/${keyPath}/${now}_${original}`;
-    const { url } = await uploadBuffer(path, one.buffer, one.mimetype || "application/octet-stream", {
-      projectId: String(projectId),
-      clientId: String(targetProject.client || ''),
-      userId: String(me?._id || ''),
-      uploadedBy: String(me?._id || ''),
-      category: 'requirements',
-      originalName: original,
+    const { url } = await putObject({
+      path,
+      buffer: one.buffer,
+      contentType: one.mimetype || "application/octet-stream",
+      metadata: {
+        projectId: String(projectId),
+        clientId: String(targetProject.client || ''),
+        userId: String(me?._id || ''),
+        uploadedBy: String(me?._id || ''),
+        category: 'requirements',
+        originalName: original,
+      },
     });
     return { name: original, type: one.mimetype, size: one.size, path, url };
   }

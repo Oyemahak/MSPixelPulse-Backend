@@ -1,8 +1,8 @@
 import 'dotenv/config';
 import path from 'path';
 import { pathToFileURL } from 'url';
-import connectDB from '../config/db.js';
 import SiteContent from '../models/SiteContent.js';
+import { dataProviderName } from '../config/providers.js';
 
 const force = process.env.SITE_CONTENT_FORCE === 'true';
 
@@ -21,8 +21,7 @@ async function loadFrontendData() {
 }
 
 async function run() {
-  await connectDB();
-  await SiteContent.createIndexes();
+  if (dataProviderName() !== 'google') throw new Error('seed:content requires DATA_PROVIDER=google');
   const records = await loadFrontendData();
   const report = { imported: 0, updated: 0, skipped: 0 };
   for (const record of records) {
@@ -38,7 +37,6 @@ async function run() {
     }
   }
   console.log(JSON.stringify({ ...report, total: records.length }, null, 2));
-  await SiteContent.db.close();
 }
 
 run().catch((error) => {

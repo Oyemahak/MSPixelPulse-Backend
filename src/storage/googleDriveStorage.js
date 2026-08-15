@@ -6,7 +6,7 @@ import { signDriveFileAccess } from './fileAccessToken.js';
 
 function publicApiBase() {
   const configured = String(
-    process.env.API_PUBLIC_BASE || process.env.RENDER_EXTERNAL_URL || process.env.VERCEL_URL || '',
+    process.env.API_PUBLIC_BASE || process.env.VERCEL_URL || '',
   ).trim();
   if (configured) return configured.startsWith('http') ? configured.replace(/\/$/, '') : `https://${configured.replace(/\/$/, '')}`;
   return `http://localhost:${process.env.PORT || 4000}`;

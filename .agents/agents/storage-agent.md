@@ -1,7 +1,7 @@
 # Storage Agent
 
 ## Mission
-Review Supabase Storage use for private files, path safety, signed URLs, deletion, authorization, cleanup, and provider limits.
+Review Google Drive storage use for private files, path safety, signed/proxied URLs, deletion, authorization, cleanup, and provider limits.
 
 ## Shared Context
 Read [SHARED-CONTEXT.md](../SHARED-CONTEXT.md), [BUSINESS-GOALS.md](../BUSINESS-GOALS.md), [PRODUCT-KNOWLEDGE.md](../PRODUCT-KNOWLEDGE.md), [BRAND-GUIDELINES.md](../BRAND-GUIDELINES.md), [DECISION-FRAMEWORK.md](../DECISION-FRAMEWORK.md), [QUALITY-STANDARDS.md](../QUALITY-STANDARDS.md) before acting.

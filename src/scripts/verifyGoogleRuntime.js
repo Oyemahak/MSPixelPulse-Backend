@@ -7,7 +7,7 @@ import Requirement from '../models/Requirement.js';
 import Room from '../models/Room.js';
 import SupportTicket from '../models/SupportTicket.js';
 import User from '../models/User.js';
-import { removePaths } from '../lib/supabase.js';
+import { removeObjects as removePaths } from '../lib/storage.js';
 import { googleFilesRepository } from '../repositories/files.repository.js';
 
 if (!process.argv.includes('--confirm-production')) throw new Error('Runtime verification requires --confirm-production');
@@ -192,12 +192,31 @@ try {
   const profileAfter = record('profile and settings persist', await request('/users/me', { token: clientAToken }), [200]).user;
   if (profileAfter.phone !== marker || profileAfter.themePreference !== 'light') throw new Error('Profile settings did not persist');
 
-  const avatar = await directUpload(
-    clientAToken,
-    new File([Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZQmcAAAAASUVORK5CYII=', 'base64')], `${marker}.png`, { type: 'image/png' }),
-    { purpose: 'avatar' },
-  );
-  resources.paths.push(avatar.file.logicalPath);
+  const avatarForm = new FormData();
+  avatarForm.append('avatar', new File([
+    Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZQmcAAAAASUVORK5CYII=', 'base64'),
+  ], `${marker}.png`, { type: 'image/png' }));
+  const uploadedAvatar = record('client avatar multipart upload', await request('/users/me/avatar', {
+    method: 'POST', token: clientAToken, form: avatarForm,
+  }), [200]);
+  if (!uploadedAvatar.avatarPath || !uploadedAvatar.avatarUrl) throw new Error('Avatar upload did not persist a Drive-backed profile value');
+  const replacementAvatarForm = new FormData();
+  replacementAvatarForm.append('avatar', new File([
+    Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADElEQVR42mNk+M/wHwAF/gL+RRCnVAAAAABJRU5ErkJggg==', 'base64'),
+  ], `${marker}-replacement.png`, { type: 'image/png' }));
+  const replacementAvatar = record('client avatar replacement upload', await request('/users/me/avatar', {
+    method: 'POST', token: clientAToken, form: replacementAvatarForm,
+  }), [200]);
+  if (!replacementAvatar.avatarPath || replacementAvatar.avatarPath === uploadedAvatar.avatarPath) {
+    throw new Error('Avatar replacement did not persist a new Drive path');
+  }
+  const oldAvatarResponse = await fetch(uploadedAvatar.avatarUrl);
+  checks.push({ name: 'replaced avatar is removed from Drive', status: oldAvatarResponse.status, passed: oldAvatarResponse.status === 404 });
+  if (oldAvatarResponse.status !== 404) throw new Error(`Old avatar remained accessible with HTTP ${oldAvatarResponse.status}`);
+  const avatarProfile = record('avatar persists after profile reload', await request('/users/me', {
+    token: clientAToken,
+  }), [200]).user;
+  if (avatarProfile.avatarPath !== replacementAvatar.avatarPath || !avatarProfile.avatarUrl) throw new Error('Avatar did not persist after profile reload');
   record('client avatar remove', await request('/users/me/avatar', {
     method: 'DELETE', token: clientAToken,
   }), [200]);

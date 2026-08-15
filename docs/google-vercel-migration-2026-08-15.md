@@ -88,8 +88,8 @@ Original Supabase references remain in the metadata for rollback.
   through the Google Sheets provider model.
 - `STORAGE_PROVIDER=google-drive` selects private Drive storage and signed API
   downloads.
-- Defaults remain `mongodb` and `supabase`, preserving the old deployment as a
-  rollback path.
+- Production is explicitly configured for `google` and `google-drive`; the
+  Mongoose schema façade remains only for controller compatibility.
 - Browser uploads use authenticated resumable Drive sessions. File bytes go
   directly to Google rather than through the Vercel Function request body.
 - Room and direct messaging use the existing reliable REST persistence path.
@@ -105,13 +105,9 @@ verifies that cleanup removed every marker record.
 
 Rollback does not require data deletion:
 
-1. Restore the prior frontend deployment or point `VITE_API_BASE` back to the
-   existing Render API.
-2. Keep the Render service configured with `DATA_PROVIDER=mongodb` and
-   `STORAGE_PROVIDER=supabase`.
-3. If MongoDB restoration is ever needed, use the verified archive in the
+1. Restore a prior Vercel deployment only if a new Vercel release fails.
+2. If MongoDB restoration is ever needed, use the verified archive in the
    backup root and restore into a new database first; never overwrite the only
    copy.
-4. Retain the Google destinations and Supabase originals until rollback is no
-   longer required and the owner explicitly approves retirement.
-
+3. Retain the Google destinations and the external backup archives until
+   recovery is no longer required and the owner explicitly approves retirement.

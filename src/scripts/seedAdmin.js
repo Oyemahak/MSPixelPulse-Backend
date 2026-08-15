@@ -1,10 +1,9 @@
 // src/scripts/seedAdmin.js
 import 'dotenv/config';
-import mongoose from 'mongoose';
 import User from '../models/User.js';
+import { dataProviderName } from '../config/providers.js';
 
 const {
-  MONGO_URI,
   ADMIN_NAME,
   ADMIN_EMAIL,
   ADMIN_PASSWORD,
@@ -15,14 +14,11 @@ const {
 } = process.env;
 
 async function main() {
-  if (!MONGO_URI) throw new Error('MONGO_URI missing in .env');
+  if (dataProviderName() !== 'google') throw new Error('seed:admin requires DATA_PROVIDER=google');
   const adminName = ADMIN_NAME || SEED_ADMIN_NAME;
   const adminEmail = String(ADMIN_EMAIL || SEED_ADMIN_EMAIL).trim().toLowerCase();
   const adminPassword = ADMIN_PASSWORD || SEED_ADMIN_PASSWORD;
   if (!adminEmail || !adminPassword) throw new Error('ADMIN_EMAIL and ADMIN_PASSWORD are required');
-
-  await mongoose.connect(MONGO_URI);
-  console.log('✅ Connected to MongoDB');
 
   let user = await User.findOne({ email: adminEmail }).select('+password');
 
@@ -53,5 +49,4 @@ async function main() {
 }
 
 main()
-  .catch(err => { console.error('❌ Seed error:', err); })
-  .finally(async () => { await mongoose.disconnect(); process.exit(0); });
+  .catch(err => { console.error('❌ Seed error:', err); process.exitCode = 1; });

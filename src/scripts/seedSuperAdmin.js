@@ -1,23 +1,35 @@
 import 'dotenv/config';
-import mongoose from 'mongoose';
-import connectDB from '../config/db.js';
+
 import User from '../models/User.js';
+import { dataProviderName } from '../config/providers.js';
 
 function required(name) {
-  const value = process.env[name]?.trim();
-  if (!value) throw new Error(`${name} is required`);
+  const value = String(process.env[name] || '').trim();
+
+  if (!value) {
+    throw new Error(`${name} is required`);
+  }
+
   return value;
 }
 
 async function run() {
+  if (dataProviderName() !== 'google') {
+    throw new Error(
+      'seed:super-admin now requires DATA_PROVIDER=google',
+    );
+  }
+
   const email = required('SUPER_ADMIN_EMAIL').toLowerCase();
   const password = required('SUPER_ADMIN_PASSWORD');
   const name = required('SUPER_ADMIN_NAME');
-  const shouldResetPassword = process.env.SUPER_ADMIN_FORCE_PASSWORD_RESET === 'true';
 
-  await connectDB();
+  const shouldResetPassword =
+    String(process.env.SUPER_ADMIN_FORCE_PASSWORD_RESET || '')
+      .toLowerCase() === 'true';
 
-  const existing = await User.findOne({ email }).select('+password');
+  const existing = await User.findOne({ email });
+
   if (!existing) {
     await User.create({
       name,
@@ -33,10 +45,27 @@ async function run() {
       timezone: 'America/Toronto',
       preferredContactMethod: 'portal',
       bio: 'Primary MSPixelPulse account for protected production administration.',
-      specialties: ['Agency operations', 'Client portals', 'Website delivery'],
-      technologies: ['React', 'Node.js', 'MongoDB', 'Supabase'],
+      specialties: [
+        'Agency operations',
+        'Client portals',
+        'Website delivery',
+      ],
+      technologies: [
+        'React',
+        'Node.js',
+        'Google Sheets',
+        'Google Drive',
+      ],
     });
-    console.log(JSON.stringify({ ok: true, action: 'created', email, passwordReset: true }, null, 2));
+
+    console.log(JSON.stringify({
+      ok: true,
+      provider: 'google',
+      action: 'created',
+      email,
+      passwordReset: true,
+    }, null, 2));
+
     return;
   }
 
@@ -49,26 +78,51 @@ async function run() {
   existing.protectedReason = 'Primary MSPixelPulse super admin account';
   existing.jobTitle = existing.jobTitle || 'Founder / Super Admin';
   existing.timezone = existing.timezone || 'America/Toronto';
-  existing.preferredContactMethod = existing.preferredContactMethod || 'portal';
-  existing.bio = existing.bio || 'Primary MSPixelPulse account for protected production administration.';
-  existing.specialties = existing.specialties?.length
-    ? existing.specialties
-    : ['Agency operations', 'Client portals', 'Website delivery'];
-  existing.technologies = existing.technologies?.length
-    ? existing.technologies
-    : ['React', 'Node.js', 'MongoDB', 'Supabase'];
+  existing.preferredContactMethod =
+    existing.preferredContactMethod || 'portal';
 
-  if (shouldResetPassword) existing.password = password;
+  existing.bio =
+    existing.bio ||
+    'Primary MSPixelPulse account for protected production administration.';
+
+  existing.specialties =
+    existing.specialties?.length
+      ? existing.specialties
+      : [
+          'Agency operations',
+          'Client portals',
+          'Website delivery',
+        ];
+
+  existing.technologies =
+    existing.technologies?.length
+      ? existing.technologies
+      : [
+          'React',
+          'Node.js',
+          'Google Sheets',
+          'Google Drive',
+        ];
+
+  if (shouldResetPassword) {
+    existing.password = password;
+  }
+
   await existing.save();
 
-  console.log(JSON.stringify({ ok: true, action: 'updated', email, passwordReset: shouldResetPassword }, null, 2));
+  console.log(JSON.stringify({
+    ok: true,
+    provider: 'google',
+    action: 'updated',
+    email,
+    passwordReset: shouldResetPassword,
+  }, null, 2));
 }
 
-run()
-  .catch((error) => {
-    console.error(error.message || 'Super admin seed failed');
-    process.exitCode = 1;
-  })
-  .finally(async () => {
-    await mongoose.disconnect().catch(() => {});
-  });
+run().catch((error) => {
+  console.error(
+    error?.message || 'Super admin seed failed',
+  );
+
+  process.exitCode = 1;
+});
