@@ -121,7 +121,17 @@ function columnName(index) {
   return name;
 }
 
-function stableCellValue(value) {
+/*
+ * Google Sheets returns RAW values as strings for many cells.
+ *
+ * Do not blindly JSON.parse every scalar because IDs/phone numbers
+ * such as "007" must remain strings.
+ *
+ * We explicitly restore booleans because account protection,
+ * publication state, visibility flags, notification preferences,
+ * and other permission-sensitive fields depend on true booleans.
+ */
+function parsedCellValue(value) {
   if (
     value === undefined ||
     value === null
@@ -129,23 +139,22 @@ function stableCellValue(value) {
     return '';
   }
 
-  if (value instanceof Date) {
-    return value.toISOString();
+  if (typeof value === 'boolean') {
+    return value;
   }
 
-  if (
-    typeof value === 'object'
-  ) {
-    return JSON.stringify(value);
+  const raw = String(value);
+
+  const normalized =
+    raw.trim().toLowerCase();
+
+  if (normalized === 'true') {
+    return true;
   }
 
-  return String(value);
-}
-
-function parsedCellValue(value) {
-  const raw = String(
-    value ?? '',
-  );
+  if (normalized === 'false') {
+    return false;
+  }
 
   const looksLikeJson =
     (
@@ -166,6 +175,25 @@ function parsedCellValue(value) {
   }
 
   return raw;
+}
+
+function stableCellValue(value) {
+  if (
+    value === undefined ||
+    value === null
+  ) {
+    return '';
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  if (typeof value === 'object') {
+    return JSON.stringify(value);
+  }
+
+  return String(value);
 }
 
 function recordFromRow(
@@ -450,12 +478,6 @@ export async function ensureGoogleSheetTabs({
   };
 }
 
-/**
- * Google Sheets table adapter.
- *
- * Sheet row positions are internal implementation details.
- * Stable application IDs remain the durable identifiers.
- */
 export class GoogleSheetsRepository {
   constructor(
     tab,
@@ -797,7 +819,6 @@ export class GoogleSheetsRepository {
     page = 1,
     limit = 100,
     sort,
-    fresh = false,
   } = {}) {
     const safePage =
       Math.max(
@@ -810,16 +831,13 @@ export class GoogleSheetsRepository {
         500,
         Math.max(
           1,
-          Number(limit) ||
-            100,
+          Number(limit) || 100,
         ),
       );
 
     let items =
       (
-        await this.readRows({
-          fresh,
-        })
+        await this.readRows()
       ).records
         .map(
           ({ record }) =>
@@ -834,8 +852,7 @@ export class GoogleSheetsRepository {
         );
 
     if (
-      typeof sort ===
-      'function'
+      typeof sort === 'function'
     ) {
       items =
         items.sort(sort);
@@ -844,12 +861,13 @@ export class GoogleSheetsRepository {
     const total =
       items.length;
 
-    items = items.slice(
-      (safePage - 1) *
-        safeLimit,
-      safePage *
-        safeLimit,
-    );
+    items =
+      items.slice(
+        (safePage - 1) *
+          safeLimit,
+        safePage *
+          safeLimit,
+      );
 
     return {
       items,
@@ -863,9 +881,7 @@ export class GoogleSheetsRepository {
     };
   }
 
-  async create(
-    input = {},
-  ) {
+  async create(input = {}) {
     const now =
       new Date().toISOString();
 
@@ -874,29 +890,20 @@ export class GoogleSheetsRepository {
 
       [this.idField]:
         String(
-          input[
-            this.idField
-          ] ||
+          input[this.idField] ||
             crypto.randomUUID(),
         ),
 
       createdAt:
-        input.createdAt ||
-        now,
+        input.createdAt || now,
 
       updatedAt:
-        input.updatedAt ||
-        now,
+        input.updatedAt || now,
     };
 
     const existing =
       await this.findById(
-        record[
-          this.idField
-        ],
-        {
-          fresh: true,
-        },
+        record[this.idField],
       );
 
     if (existing) {
@@ -957,6 +964,7 @@ export class GoogleSheetsRepository {
 
       records: [
         ...current.records,
+
         {
           record,
           rowNumber:
@@ -976,9 +984,7 @@ export class GoogleSheetsRepository {
     records = [],
   ) {
     if (
-      !Array.isArray(
-        records,
-      ) ||
+      !Array.isArray(records) ||
       records.length === 0
     ) {
       return [];
@@ -1014,22 +1020,14 @@ export class GoogleSheetsRepository {
       new Set();
 
     for (
-      const record of
-      prepared
+      const record of prepared
     ) {
       if (
         seen.has(
-          record[
-            this.idField
-          ],
+          record[this.idField],
         ) ||
         await this.findById(
-          record[
-            this.idField
-          ],
-          {
-            fresh: true,
-          },
+          record[this.idField],
         )
       ) {
         const error =
@@ -1046,9 +1044,7 @@ export class GoogleSheetsRepository {
       }
 
       seen.add(
-        record[
-          this.idField
-        ],
+        record[this.idField],
       );
     }
 
@@ -1127,9 +1123,7 @@ export class GoogleSheetsRepository {
     records = [],
   ) {
     if (
-      !Array.isArray(
-        records,
-      ) ||
+      !Array.isArray(records) ||
       records.length === 0
     ) {
       return [];
@@ -1201,9 +1195,7 @@ export class GoogleSheetsRepository {
       );
 
     const before =
-      await this.readRows({
-        fresh: true,
-      });
+      await this.readRows();
 
     const currentById =
       new Map(
@@ -1260,14 +1252,11 @@ export class GoogleSheetsRepository {
     const inserts = [];
 
     for (
-      const record of
-      merged
+      const record of merged
     ) {
       const current =
         currentById.get(
-          record[
-            this.idField
-          ],
+          record[this.idField],
         );
 
       if (current) {
@@ -1276,8 +1265,7 @@ export class GoogleSheetsRepository {
             `${quotedSheetName(
               this.tab,
             )}!A${current.rowNumber}:${columnName(
-              headers.length -
-                1,
+              headers.length - 1,
             )}${current.rowNumber}`,
 
           values: [
@@ -1299,20 +1287,18 @@ export class GoogleSheetsRepository {
     ) {
       await withGoogleRetry(
         () =>
-          values.batchUpdate(
-            {
-              spreadsheetId:
-                this.resolveSpreadsheetId(),
+          values.batchUpdate({
+            spreadsheetId:
+              this.resolveSpreadsheetId(),
 
-              requestBody: {
-                valueInputOption:
-                  'RAW',
+            requestBody: {
+              valueInputOption:
+                'RAW',
 
-                data:
-                  updates,
-              },
+              data:
+                updates,
             },
-          ),
+          }),
       );
     }
 
@@ -1424,9 +1410,7 @@ export class GoogleSheetsRepository {
         existingHeaders,
       records,
     } =
-      await this.readRows({
-        fresh: true,
-      });
+      await this.readRows();
 
     const target =
       records.find(
@@ -1472,6 +1456,7 @@ export class GoogleSheetsRepository {
           this.idField,
           'createdAt',
           'updatedAt',
+
           ...Object.keys(
             record,
           ),
@@ -1481,7 +1466,7 @@ export class GoogleSheetsRepository {
     let headers =
       existingHeaders;
 
-    const headersChanged =
+    if (
       requestedHeaders.length !==
         existingHeaders.length ||
       requestedHeaders.some(
@@ -1490,11 +1475,14 @@ export class GoogleSheetsRepository {
           index,
         ) =>
           header !==
-          existingHeaders[index],
-      );
-
-    if (headersChanged) {
-      ({ headers } =
+          existingHeaders[
+            index
+          ],
+      )
+    ) {
+      ({
+        headers,
+      } =
         await this.ensureHeaders(
           requestedHeaders,
         ));
@@ -1513,8 +1501,7 @@ export class GoogleSheetsRepository {
             `${quotedSheetName(
               this.tab,
             )}!A${target.rowNumber}:${columnName(
-              headers.length -
-                1,
+              headers.length - 1,
             )}${target.rowNumber}`,
 
           valueInputOption:
@@ -1549,6 +1536,7 @@ export class GoogleSheetsRepository {
       nextRowNumber:
         Math.max(
           2,
+
           ...records.map(
             (entry) =>
               entry.rowNumber +
@@ -1564,9 +1552,7 @@ export class GoogleSheetsRepository {
     const {
       records,
     } =
-      await this.readRows({
-        fresh: true,
-      });
+      await this.readRows();
 
     const target =
       records.find(
@@ -1599,8 +1585,8 @@ export class GoogleSheetsRepository {
 
     const sheet =
       (
-        metadata.data
-          .sheets || []
+        metadata.data.sheets ||
+        []
       ).find(
         (item) =>
           item.properties
@@ -1655,7 +1641,49 @@ export class GoogleSheetsRepository {
         }),
     );
 
-    this.invalidateCache();
+    /*
+     * Do not perform another Google read here.
+     *
+     * We already have the exact pre-delete row snapshot. Rebuild the
+     * in-memory cache deterministically after the row deletion.
+     */
+    const remaining =
+      records
+        .filter(
+          (entry) =>
+            entry.rowNumber !==
+            target.rowNumber,
+        )
+        .map(
+          (entry) =>
+            entry.rowNumber >
+            target.rowNumber
+              ? {
+                  ...entry,
+                  rowNumber:
+                    entry.rowNumber -
+                    1,
+                }
+              : entry,
+        );
+
+    this.cacheRows({
+      headers:
+        (
+          await this.readRows({
+            fresh: true,
+          })
+        ).headers,
+
+      records:
+        remaining,
+
+      nextRowNumber:
+        Math.max(
+          2,
+          remaining.length + 2,
+        ),
+    });
 
     return true;
   }
@@ -1677,9 +1705,7 @@ export class GoogleSheetsRepository {
     const {
       records,
     } =
-      await this.readRows({
-        fresh: true,
-      });
+      await this.readRows();
 
     const targets =
       records
@@ -1725,8 +1751,8 @@ export class GoogleSheetsRepository {
 
     const sheet =
       (
-        metadata.data
-          .sheets || []
+        metadata.data.sheets ||
+        []
       ).find(
         (item) =>
           item.properties
