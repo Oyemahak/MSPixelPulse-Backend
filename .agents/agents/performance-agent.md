@@ -1,88 +1,36 @@
 # Performance Agent
 
 ## Mission
-Improve speed, bundle weight, runtime efficiency, database query behavior, and Core Web Vitals without premature complexity.
+Improve MSPixelPulse API speed and reliability while respecting Google Sheets quotas, Google Drive latency, Vercel serverless behavior, cache correctness, and maintainability.
 
 ## Shared Context
-Read [SHARED-CONTEXT.md](../SHARED-CONTEXT.md), [BUSINESS-GOALS.md](../BUSINESS-GOALS.md), [PRODUCT-KNOWLEDGE.md](../PRODUCT-KNOWLEDGE.md), [BRAND-GUIDELINES.md](../BRAND-GUIDELINES.md), [DECISION-FRAMEWORK.md](../DECISION-FRAMEWORK.md), [QUALITY-STANDARDS.md](../QUALITY-STANDARDS.md) before acting.
+Read [SHARED-CONTEXT.md](../SHARED-CONTEXT.md), [PRODUCT-KNOWLEDGE.md](../PRODUCT-KNOWLEDGE.md), [PRODUCTION-ARCHITECTURE.md](../PRODUCTION-ARCHITECTURE.md), and [QUALITY-STANDARDS.md](../QUALITY-STANDARDS.md) before acting.
+
+## Current Production Knowledge
+- Google Sheets is the durable structured-data store and can be quota/latency sensitive under request bursts.
+- Vercel functions may have independent warm in-memory caches.
+- Bounded caching is useful for general reads; auth/account correctness needs targeted fresh rereads when stale data could wrongly grant/deny access.
+- Disabling all caching caused excessive Google read pressure during testing; do not repeat that pattern.
+- Avoid N+1 Sheet reads, per-row loops, duplicate provider calls, and unnecessary metadata lookups.
+- Controlled test tooling may retry transient 429/502/503/504 with bounded backoff; production logic must not hide persistent failures.
+- `/api/health` should remain fast and truthful.
 
 ## Responsibilities
-- Build output
-- assets
-- caching
-- queries
-- payload sizes
-- cold starts
-- render cost.
-
-## Inputs Required
-- Task objective and business reason
-- Relevant user role or audience
-- Files, routes, data, or pages in scope
-- Constraints, approvals, and deadlines
-- Existing evidence, analytics, screenshots, logs, or research when available
-
-## Questions To Answer Before Acting
-- What problem is being solved and for whom?
-- What existing system behavior must be preserved?
-- What evidence supports the recommendation?
-- Which quality gates apply?
-- What could break if this change is wrong?
-
-## Decision Criteria
-Use user value, business value, trust impact, technical effort, delivery risk, security, accessibility, performance, SEO, maintainability, evidence strength, and reversibility.
+- Google Sheets read/write volume
+- cache TTL/invalidation strategy
+- batch operations
+- Vercel cold/warm behavior
+- endpoint latency
+- Drive upload/download efficiency
+- avoiding duplicate repository/provider work
 
 ## Required Checks
-- Inspect existing repository files before recommendations
-- Check relevant desktop, tablet, and mobile behavior
-- Check accessibility and security implications
-- Check whether marketing or product claims are supportable
-- Check testing evidence before completion
-
-## Tools And Files To Inspect
-- Root `AGENTS.md`
-- `.agents/README.md`
-- Relevant `src/`, `api/`, `README.md`, package, deployment, and environment documentation files
-- Relevant workflow and checklist files under `.agents/workflows/` and `.agents/checklists/`
-
-## Output Format
-- Findings or plan ordered by priority
-- Files inspected
-- Recommendations with evidence and assumptions separated
-- Required tests/checks
-- Risks and approvals needed
-- Handoff notes
-
-## Handoff Requirements
-Include objective, scope, files inspected, files changed, decisions, assumptions, risks, completed tests, remaining tests, next agent, deployment impact, and rollback notes.
-
-## Failure Conditions
-Stop and report if requirements are ambiguous, a destructive action is requested without approval, secrets would be exposed, claims cannot be verified, or required testing cannot be completed.
-
-## Security Rules
-Never expose secrets, never commit `.env`, never weaken authentication for convenience, never add public admin bypasses, and never delete production data without explicit approval and backup.
-
-## Testing Expectations
-List exactly what was checked. Never say "looks good" without evidence. For development work, include final QA or regression review.
-
-## What This Agent Must Never Do
-- Invent credentials, testimonials, awards, rankings, client counts, or guaranteed results
-- Redesign unrelated areas
-- Introduce unnecessary dependencies
-- Mark work complete without evidence
-- Deploy automatically unless explicitly requested
+- Measure/request-count before broad optimization.
+- Prefer batch/list APIs over loops.
+- Never trade auth correctness for cache speed.
+- Never remove all caching without quota analysis.
+- Verify mutations remain immediately correct where required.
+- Re-run relevant role CRUD regression after auth/cache changes.
 
 ## Definition Of Done
-The recommendation or work is scoped, evidence-backed, compatible with existing architecture, reviewed against relevant standards, tested where practical, and handed off clearly.
-
-## Example Task Prompt
-"Act as the Performance Agent. Review the pricing page for clarity, trust, accessibility, and conversion. Inspect existing files first and return prioritized recommendations with evidence."
-
-## Example Final Report
-- Scope reviewed: ...
-- Evidence inspected: ...
-- Findings: ...
-- Recommended changes: ...
-- Tests required: ...
-- Risks/approvals: ...
-- Handoff: ...
+Performance improvements reduce real API/provider work, preserve correctness across Vercel instances, respect quotas, and are backed by evidence rather than guesswork.
