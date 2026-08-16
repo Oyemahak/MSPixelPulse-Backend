@@ -40,7 +40,7 @@ The production spreadsheet is the durable structured-data store. Core tabs inclu
 
 Stable application IDs are authoritative. Spreadsheet row numbers are implementation details only.
 
-Mongoose schemas may remain as a controller/query compatibility facade while persistence is routed through the Google provider layer. Do not create a MongoDB connection or treat Mongoose model presence as evidence that MongoDB is still the database.
+Mongoose-shaped schemas/models may remain as controller/query compatibility facades while persistence is routed through the Google provider layer. Do not create a MongoDB connection or treat model presence as evidence that MongoDB is active.
 
 ## Google Drive Is The File Store
 
@@ -62,7 +62,7 @@ Expected managed hierarchy:
       - Message Attachments
       - Uploads
 
-Do not expose the Google OAuth refresh token, client secret, raw Drive credentials, or private Drive file URLs to the browser.
+Do not expose the Google OAuth refresh token, client secret, raw Drive credentials, password hashes, or private Drive file URLs to the browser.
 
 ## File Read Authorization
 
@@ -82,6 +82,17 @@ The backend file proxy must perform authorization before streaming private bytes
 Small uploads may pass through the backend within platform body-size limits. Larger uploads should use an authorized Google Drive resumable upload session.
 
 Upload authorization must bind the session to the authenticated user, project/client scope, declared purpose, file metadata, and completion token. Completion must re-check authorization and validate Drive metadata before recording the file.
+
+## Authentication Architecture
+
+Authentication is centralized in `src/middleware/auth.js`.
+
+- JWT signature verification, active-account checks, role/session validation, and stale Google user rereads belong in the shared auth middleware.
+- `/api/auth/me` must pass through `requireAuth`; controllers must not duplicate a second independent JWT/account validation path.
+- Password changes increment `authVersion`; pre-change JWTs are intentionally invalid.
+- A fresh login must issue a JWT carrying the current `authVersion`.
+- Vercel serverless instances may hold different warm in-memory cache snapshots. When cached auth/account state would reject a token, perform one authoritative fresh `Users` Sheet reread before returning 401.
+- A Google provider outage or timeout is a service-availability problem, not invalid credentials. Do not convert provider errors into misleading 401 responses.
 
 ## CRUD Contract
 
@@ -117,6 +128,30 @@ Developers must be able to perform all operations the UI promises for projects a
 
 Successful writes must survive navigation, refresh, logout/login, a new browser session, and a new Vercel function instance. Never use in-memory state as the durable source of truth.
 
+## Verified Production Role Baseline — 2026-08-15
+
+A disposable production E2E run completed with 35 checks passed, 0 failed, and complete cleanup. Verified behavior:
+
+- protected real Admin authenticated only for test bootstrap/cleanup
+- disposable Admin creation and login
+- disposable Developer and Client creation
+- Admin list/detail reads
+- Developer and Client identity updates
+- disposable Admin password change and fresh login
+- Developer and Client password changes
+- Admin, Developer, and Client `/auth/me` identity verification
+- Admin, Developer, and Client profile persistence
+- Developer/Client rejection from Admin APIs
+- disposable Admin access to Admin APIs
+- Developer role mutation to Client and restoration to Developer
+- Client suspension, persisted suspended status, reactivation, and persisted active status
+- permanent deletion of Client, Developer, and disposable Admin
+- post-delete verification that all disposable test users were absent
+
+This is the minimum regression baseline for future authentication/account CRUD work.
+
+The real protected production Admin must never be edited, role-changed, suspended, password-reset, or otherwise mutated as a test subject. Create a disposable Admin for test operations.
+
 ## Authorization Rules
 
 - Authentication and authorization are separate concerns.
@@ -126,13 +161,15 @@ Successful writes must survive navigation, refresh, logout/login, a new browser 
 - Re-check authorization on destructive actions and resumable-upload completion.
 - Return 401 for missing/invalid authentication and 403 for authenticated users lacking permission.
 
-## Cache Rules
+## Cache And Quota Rules
 
 Google Sheets caching may be used to control quota, but correctness wins over cache convenience.
 
 - Credential/account reads that affect login, password changes, role changes, suspension/activation, and authorization must be fresh when stale data could grant or deny access incorrectly.
 - Mutations must update or invalidate the relevant cache.
-- Do not solve stale authorization by disabling all caching if doing so causes Google Sheets quota failures; prefer targeted fresh reads.
+- Do not disable all caching if doing so causes Google Sheets quota failures; prefer targeted fresh reads.
+- Avoid duplicate portal reads, aggressive polling, and unnecessary per-entity requests when list/batch APIs can provide the same information.
+- Controlled production E2E tooling may retry transient 429/502/503/504 responses with bounded backoff. Persistent failures must still fail the test.
 
 ## Required Verification Matrix
 
@@ -175,6 +212,7 @@ For file operations additionally verify:
 - Verify `/api/health` reports `data: google`, `storage: google-drive`, configured Google Sheets/Drive, and configured email.
 - Verify the browser frontend targets the current production API.
 - Do not reintroduce Render, Supabase, or MongoDB production environment variables.
+- After auth/provider changes, verify a disposable-role production flow rather than relying only on unit tests.
 
 ## Agent Behavior
 
