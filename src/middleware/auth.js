@@ -1,114 +1,288 @@
 // src/middleware/auth.js
 
-import jwt from 'jsonwebtoken';
+import jwt from "jsonwebtoken";
 
-import { jwtSecret } from '../utils/jwt.js';
-import { isPortalAccountActive } from '../lib/accountPolicy.js';
-import { usersRepository } from '../repositories/users.repository.js';
+import {
+  accountAccessState,
+} from "../lib/accountPolicy.js";
 
-function getToken(req) {
-  const header =
-    req.headers.authorization;
+import {
+  requiredEnv,
+} from "../config/env.js";
+
+import {
+  usersRepository,
+} from "../repositories/users.repository.js";
+
+const AUTH_CACHE_TTL_MS = 30_000;
+const AUTH_STALE_GRACE_MS = 90_000;
+const AUTH_CACHE_MAX = 500;
+
+const authCache = new Map();
+
+function getCookieToken(req) {
+  const cookieHeader = String(
+    req.headers?.cookie || "",
+  );
+
+  for (const cookie of cookieHeader.split(";")) {
+    const [name, ...valueParts] =
+      cookie.trim().split("=");
+
+    if (name === "token") {
+      return decodeURIComponent(
+        valueParts.join("="),
+      );
+    }
+  }
+
+  return "";
+}
+
+function getBearerToken(req) {
+  const value = String(
+    req.headers?.authorization || "",
+  ).trim();
 
   if (
-    header?.startsWith(
-      'Bearer ',
+    value.toLowerCase().startsWith("bearer ")
+  ) {
+    return value.slice(7).trim();
+  }
+
+  return "";
+}
+
+function getRequestToken(req) {
+  return (
+    getBearerToken(req) ||
+    getCookieToken(req)
+  );
+}
+
+function jwtSecret() {
+  return requiredEnv("JWT_SECRET");
+}
+
+function authVersion(value) {
+  const version = Number(
+    value ?? 0,
+  );
+
+  return Number.isFinite(version)
+    ? version
+    : 0;
+}
+
+function cacheKey(id) {
+  return String(id || "");
+}
+
+function pruneCache() {
+  if (
+    authCache.size < AUTH_CACHE_MAX
+  ) {
+    return;
+  }
+
+  const ordered =
+    [...authCache.entries()].sort(
+      (
+        [, left],
+        [, right],
+      ) =>
+        Number(left?.storedAt || 0) -
+        Number(right?.storedAt || 0),
+    );
+
+  const removeCount = Math.max(
+    1,
+    Math.ceil(
+      ordered.length * 0.2,
+    ),
+  );
+
+  for (
+    const [key] of ordered.slice(
+      0,
+      removeCount,
     )
   ) {
-    return header.slice(7);
+    authCache.delete(key);
+  }
+}
+
+function rememberUser(user) {
+  const id = cacheKey(
+    user?._id || user?.id,
+  );
+
+  if (!id) {
+    return user;
   }
 
-  if (req.cookies?.token) {
-    return req.cookies.token;
-  }
+  pruneCache();
 
-  return null;
+  authCache.set(id, {
+    user,
+    storedAt: Date.now(),
+  });
+
+  return user;
 }
 
-function tokenVersion(payload) {
-  return Number(
-    payload?.ver || 0,
-  );
-}
-
-function userVersion(user) {
-  return Number(
-    user?.authVersion || 0,
-  );
-}
-
-function validSession(
-  user,
-  payload,
+function getCachedUser(
+  id,
+  maxAge = AUTH_CACHE_TTL_MS,
 ) {
-  return Boolean(
-    user &&
-    isPortalAccountActive(user) &&
-    tokenVersion(payload) ===
-      userVersion(user),
-  );
-}
+  const entry =
+    authCache.get(
+      cacheKey(id),
+    );
 
-/*
- * Vercel serverless instances can temporarily hold different copies
- * of the bounded Google Sheets Users cache.
- *
- * Normal requests use the cached user record to avoid exhausting
- * Google Sheets read quotas.
- *
- * If that cached record says the JWT is stale/inactive, do ONE fresh
- * read before rejecting it. This handles:
- *
- * - password changes / authVersion bumps
- * - requests landing on an older Vercel instance
- * - recently reactivated accounts
- *
- * We never reject a valid token solely because one warm function
- * instance has an older Users cache snapshot.
- */
-async function authenticatedUser(
-  payload,
-) {
-  const userId =
-    payload?.id ||
-    payload?.sub;
-
-  if (!userId) {
+  if (!entry?.user) {
     return null;
   }
 
+  if (
+    Date.now() -
+      Number(entry.storedAt || 0) >
+    maxAge
+  ) {
+    return null;
+  }
+
+  return entry.user;
+}
+
+export function invalidateAuthUser(
+  id,
+) {
+  authCache.delete(
+    cacheKey(id),
+  );
+}
+
+export function clearAuthCache() {
+  authCache.clear();
+}
+
+async function validateSession(
+  payload,
+) {
+  const id = payload?.id;
+
+  if (!id) {
+    return null;
+  }
+
+  const tokenVersion =
+    authVersion(
+      payload.ver,
+    );
+
+  /*
+   * Fast path:
+   * JWT is still cryptographically verified on every request,
+   * but an already validated user does not need another
+   * Google Sheets read for every API call.
+   */
   const cached =
-    await usersRepository.findById(
-      userId,
-    );
+    getCachedUser(id);
 
   if (
-    validSession(
-      cached,
-      payload,
-    )
+    cached &&
+    authVersion(
+      cached.authVersion,
+    ) === tokenVersion
   ) {
-    return cached;
+    const access =
+      accountAccessState(
+        cached,
+      );
+
+    return access.allowed
+      ? cached
+      : null;
   }
 
-  const fresh =
-    await usersRepository.findById(
-      userId,
-      {
-        fresh: true,
-      },
-    );
+  try {
+    let user =
+      await usersRepository.findById(
+        id,
+      );
 
-  if (
-    validSession(
-      fresh,
-      payload,
-    )
-  ) {
-    return fresh;
+    /*
+     * A version mismatch is security-sensitive.
+     * Confirm it against a fresh provider read.
+     */
+    if (
+      user &&
+      authVersion(
+        user.authVersion,
+      ) !== tokenVersion
+    ) {
+      user =
+        await usersRepository.findById(
+          id,
+          {
+            fresh: true,
+          },
+        );
+    }
+
+    if (!user) {
+      return null;
+    }
+
+    if (
+      authVersion(
+        user.authVersion,
+      ) !== tokenVersion
+    ) {
+      return null;
+    }
+
+    const access =
+      accountAccessState(
+        user,
+      );
+
+    if (!access.allowed) {
+      return null;
+    }
+
+    return rememberUser(user);
+  } catch (error) {
+    /*
+     * If Google has a brief outage, keep an already validated
+     * session usable for a tightly bounded grace period.
+     *
+     * We still require:
+     * - a previously validated user
+     * - matching authVersion
+     * - an active account
+     */
+    const stale =
+      getCachedUser(
+        id,
+        AUTH_STALE_GRACE_MS,
+      );
+
+    if (
+      stale &&
+      authVersion(
+        stale.authVersion,
+      ) === tokenVersion &&
+      accountAccessState(
+        stale,
+      ).allowed
+    ) {
+      return stale;
+    }
+
+    throw error;
   }
-
-  return null;
 }
 
 export async function requireAuth(
@@ -117,37 +291,34 @@ export async function requireAuth(
   next,
 ) {
   const token =
-    getToken(req);
+    getRequestToken(req);
 
   if (!token) {
     return res
       .status(401)
       .json({
-        message:
-          'Unauthorized',
+        message: "Unauthorized",
       });
   }
 
   let payload;
 
   try {
-    payload =
-      jwt.verify(
-        token,
-        jwtSecret(),
-      );
+    payload = jwt.verify(
+      token,
+      jwtSecret(),
+    );
   } catch {
     return res
       .status(401)
       .json({
-        message:
-          'Unauthorized',
+        message: "Unauthorized",
       });
   }
 
   try {
     const user =
-      await authenticatedUser(
+      await validateSession(
         payload,
       );
 
@@ -155,37 +326,32 @@ export async function requireAuth(
       return res
         .status(401)
         .json({
-          message:
-            'Unauthorized',
+          message: "Unauthorized",
         });
     }
 
-    req.user =
-      user;
+    req.user = user;
+
+    req.auth = {
+      token,
+      payload,
+    };
 
     return next();
   } catch (error) {
-    /*
-     * Google/remote-provider failures are server availability
-     * problems, not invalid credentials.
-     *
-     * Do not turn a Sheets timeout/quota/transient failure into
-     * a misleading 401.
-     */
     console.error(
-      'Authentication provider lookup failed:',
-      error?.code ||
-        error?.message ||
-        'unknown error',
+      "Authentication provider unavailable:",
+      error?.message || error,
     );
 
     return res
       .status(503)
       .json({
         message:
-          'Authentication service is temporarily unavailable',
+          "Authentication service is temporarily unavailable",
+
         code:
-          'AUTH_PROVIDER_UNAVAILABLE',
+          "AUTH_PROVIDER_UNAVAILABLE",
       });
   }
 }
@@ -196,37 +362,35 @@ export async function optionalAuth(
   next,
 ) {
   const token =
-    getToken(req);
+    getRequestToken(req);
 
   if (!token) {
     return next();
   }
 
-  let payload;
-
   try {
-    payload =
-      jwt.verify(
-        token,
-        jwtSecret(),
-      );
-  } catch {
-    return next();
-  }
+    const payload = jwt.verify(
+      token,
+      jwtSecret(),
+    );
 
-  try {
     const user =
-      await authenticatedUser(
+      await validateSession(
         payload,
       );
 
     if (user) {
-      req.user =
-        user;
+      req.user = user;
+
+      req.auth = {
+        token,
+        payload,
+      };
     }
   } catch {
     /*
-     * Optional authentication must not break public endpoints.
+     * Public/optional-auth requests should not fail because
+     * authentication infrastructure had a temporary issue.
      */
   }
 
@@ -237,44 +401,36 @@ export function requireRole(
   roles,
 ) {
   const allowed =
-    Array.isArray(roles)
-      ? roles
-      : [roles];
+    new Set(
+      (
+        Array.isArray(roles)
+          ? roles
+          : [roles]
+      )
+        .filter(Boolean)
+        .map(String),
+    );
 
   return (
     req,
     res,
     next,
   ) => {
-    if (!req.user) {
-      return res
-        .status(401)
-        .json({
-          message:
-            'Unauthorized',
-        });
-    }
-
     if (
-      !allowed.includes(
-        req.user.role,
+      !req.user ||
+      !allowed.has(
+        String(
+          req.user.role || "",
+        ),
       )
     ) {
       return res
         .status(403)
         .json({
-          message:
-            'Forbidden',
+          message: "Forbidden",
         });
     }
 
     return next();
   };
 }
-
-export const authMiddlewareInternals = {
-  getToken,
-  tokenVersion,
-  userVersion,
-  validSession,
-};
