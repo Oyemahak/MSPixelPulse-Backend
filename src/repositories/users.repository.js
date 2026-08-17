@@ -31,7 +31,9 @@ export class UsersRepository {
     );
   }
 
-  async list(options) {
+  async list(
+    options,
+  ) {
     const result =
       await this.google.list(
         options,
@@ -62,7 +64,35 @@ export class UsersRepository {
     );
   }
 
-  delete(id) {
+  async updatePresence(
+    id,
+    lastSeenAt =
+      new Date().toISOString(),
+  ) {
+    if (!id) {
+      return null;
+    }
+
+    /*
+     * Presence may only update the heartbeat timestamp.
+     * Never merge arbitrary request data here.
+     */
+    return this.present(
+      await this.google.update(
+        id,
+        {
+          lastSeenAt:
+            String(
+              lastSeenAt,
+            ),
+        },
+      ),
+    );
+  }
+
+  delete(
+    id,
+  ) {
     return this.google.delete(
       id,
     );
@@ -129,7 +159,8 @@ export class UsersRepository {
       error.code =
         'USER_EMAIL_CONFLICT';
 
-      error.status = 409;
+      error.status =
+        409;
 
       throw error;
     }
@@ -156,7 +187,8 @@ export class UsersRepository {
       error.code =
         'PASSWORD_HASH_REQUIRED';
 
-      error.status = 400;
+      error.status =
+        400;
 
       throw error;
     }
@@ -164,9 +196,15 @@ export class UsersRepository {
     const created =
       await this.google.create({
         ...input,
+
         email,
+
         passwordHash:
           hash,
+
+        lastSeenAt:
+          input.lastSeenAt ||
+          '',
       });
 
     return this.present(
@@ -197,7 +235,8 @@ export class UsersRepository {
     const valid =
       await bcrypt.compare(
         String(
-          password || '',
+          password ||
+            '',
         ),
         hash,
       );
@@ -244,7 +283,8 @@ export class UsersRepository {
             ),
 
           passwordChangedAt:
-            new Date().toISOString(),
+            new Date()
+              .toISOString(),
 
           authVersion:
             nextAuthVersion,
@@ -259,7 +299,8 @@ export class UsersRepository {
   present(
     value,
     {
-      credentials = false,
+      credentials =
+        false,
     } = {},
   ) {
     if (!value) {
@@ -300,6 +341,12 @@ export class UsersRepository {
       Number(
         user.authVersion ||
           0,
+      );
+
+    user.lastSeenAt =
+      String(
+        user.lastSeenAt ||
+          '',
       );
 
     if (

@@ -11,6 +11,11 @@ import {
 
 import {
   activeAccountPatch,
+  isPrimarySuperAdminEmail,
+  isProtectedAccount,
+  normalizePolicyEmail,
+  protectedAccountMutation,
+  strictBoolean,
 } from '../../../lib/accountPolicy.js';
 
 import {
@@ -46,53 +51,8 @@ const LEAD_STATUSES = [
 ];
 
 function normalizeEmail(email) {
-  return String(
-    email || '',
-  )
-    .trim()
-    .toLowerCase();
-}
-
-/*
- * Permission-sensitive boolean coercion.
- *
- * Google Sheets can historically contain boolean-looking text,
- * so never use Boolean("false") for authorization decisions.
- */
-function strictBoolean(value) {
-  if (value === true) {
-    return true;
-  }
-
-  if (
-    value === false ||
-    value === null ||
-    value === undefined ||
-    value === ''
-  ) {
-    return false;
-  }
-
-  const normalized =
-    String(value)
-      .trim()
-      .toLowerCase();
-
-  return (
-    normalized === 'true' ||
-    normalized === '1' ||
-    normalized === 'yes'
-  );
-}
-
-function isProtectedAccount(user) {
-  return (
-    strictBoolean(
-      user?.isSuperAdmin,
-    ) ||
-    strictBoolean(
-      user?.isProtected,
-    )
+  return normalizePolicyEmail(
+    email,
   );
 }
 
@@ -110,73 +70,6 @@ function hasForbiddenField(
   );
 }
 
-function changed(
-  before,
-  after,
-) {
-  return (
-    String(
-      before ?? '',
-    ) !==
-    String(
-      after ?? '',
-    )
-  );
-}
-
-function protectedAccountMutation(
-  user,
-  patch,
-) {
-  if (
-    Object.prototype
-      .hasOwnProperty.call(
-        patch,
-        'role',
-      ) &&
-    changed(
-      user.role,
-      patch.role,
-    )
-  ) {
-    return true;
-  }
-
-  if (
-    Object.prototype
-      .hasOwnProperty.call(
-        patch,
-        'status',
-      ) &&
-    changed(
-      user.status,
-      patch.status,
-    )
-  ) {
-    return true;
-  }
-
-  if (
-    Object.prototype
-      .hasOwnProperty.call(
-        patch,
-        'email',
-      ) &&
-    changed(
-      normalizeEmail(
-        user.email,
-      ),
-      normalizeEmail(
-        patch.email,
-      ),
-    )
-  ) {
-    return true;
-  }
-
-  return false;
-}
-
 function escapeRegex(
   value = '',
 ) {
@@ -184,6 +77,43 @@ function escapeRegex(
     /[.*+?^${}()|[\]\\]/g,
     '\\$&',
   );
+}
+
+function safeAdminUser(user) {
+  if (!user) {
+    return user;
+  }
+
+  const value =
+    typeof user.toObject ===
+      'function'
+      ? user.toObject()
+      : {
+          ...user,
+        };
+
+  delete value.password;
+  delete value.passwordHash;
+
+  const primary =
+    isPrimarySuperAdminEmail(
+      value.email,
+    );
+
+  return {
+    ...value,
+
+    isSuperAdmin:
+      primary ||
+      strictBoolean(
+        value.isSuperAdmin,
+      ),
+
+    isProtected:
+      isProtectedAccount(
+        value,
+      ),
+  };
 }
 
 /* ---------------------------------------------------------
@@ -254,12 +184,14 @@ export async function listLeads(
       cond,
     )
       .sort({
-        createdAt: -1,
+        createdAt:
+          -1,
       })
       .limit(250);
 
   return res.json({
     leads,
+
     total:
       leads.length,
   });
@@ -409,14 +341,18 @@ export async function listUsers(
       cond,
     )
       .sort({
-        createdAt: -1,
+        createdAt:
+          -1,
       })
       .select(
         '-password',
       );
 
   return res.json({
-    users,
+    users:
+      users.map(
+        safeAdminUser,
+      ),
   });
 }
 
@@ -433,11 +369,15 @@ export async function listPending(
         '-password',
       )
       .sort({
-        createdAt: -1,
+        createdAt:
+          -1,
       });
 
   return res.json({
-    users,
+    users:
+      users.map(
+        safeAdminUser,
+      ),
   });
 }
 
@@ -478,34 +418,16 @@ export async function getUser(
         '_id title status client developer createdAt updatedAt',
       )
       .sort({
-        updatedAt: -1,
+        updatedAt:
+          -1,
       })
       .lean();
 
-  const value =
-    typeof user.toObject ===
-      'function'
-      ? user.toObject()
-      : {
-          ...user,
-        };
-
-  delete value.password;
-  delete value.passwordHash;
-
   return res.json({
     user: {
-      ...value,
-
-      isSuperAdmin:
-        strictBoolean(
-          value.isSuperAdmin,
-        ),
-
-      isProtected:
-        strictBoolean(
-          value.isProtected,
-        ),
+      ...safeAdminUser(
+        user,
+      ),
 
       passwordConfigured:
         true,
@@ -551,6 +473,19 @@ export async function createUser(
     normalizeEmail(
       email,
     );
+
+  if (
+    isPrimarySuperAdminEmail(
+      normalizedEmail,
+    )
+  ) {
+    return res
+      .status(403)
+      .json({
+        message:
+          'Primary super admin account is managed through the protected super admin setup',
+      });
+  }
 
   if (
     !name ||
@@ -617,9 +552,12 @@ export async function createUser(
   const user =
     await User.create({
       name,
+
       email:
         normalizedEmail,
+
       password,
+
       role,
       status,
 
@@ -674,7 +612,10 @@ export async function createUser(
   return res
     .status(201)
     .json({
-      user: safe,
+      user:
+        safeAdminUser(
+          safe,
+        ),
     });
 }
 
@@ -684,7 +625,8 @@ export async function updateUser(
 ) {
   const {
     userId,
-  } = req.params;
+  } =
+    req.params;
 
   const allowed = [
     'name',
@@ -813,7 +755,9 @@ export async function updateUser(
       String(
         duplicate._id,
       ) !==
-        String(user._id)
+        String(
+          user._id,
+        )
     ) {
       return res
         .status(409)
@@ -852,16 +796,6 @@ export async function updateUser(
       });
   }
 
-  /*
-   * Normal clients/developers/admins are fully manageable.
-   *
-   * Only an explicitly protected account receives destructive
-   * protection. A historical string "false" is NOT protected.
-   *
-   * Unchanged protected fields are permitted in a form payload so
-   * editing a protected account's display name does not fail merely
-   * because its unchanged email was submitted alongside the name.
-   */
   if (
     isProtectedAccount(
       user,
@@ -875,7 +809,7 @@ export async function updateUser(
       .status(403)
       .json({
         message:
-          'Protected super admin account cannot be demoted, disabled, or assigned a different email here',
+          'Primary protected super admin account cannot be demoted, disabled, or assigned a different email',
       });
   }
 
@@ -944,7 +878,10 @@ export async function updateUser(
     );
 
   return res.json({
-    user: safe,
+    user:
+      safeAdminUser(
+        safe,
+      ),
   });
 }
 
@@ -980,7 +917,7 @@ export async function deleteUser(
       .status(403)
       .json({
         message:
-          'Protected super admin account cannot be deleted',
+          'Primary protected super admin account cannot be deleted',
       });
   }
 
@@ -1068,7 +1005,7 @@ export async function setUserPassword(
       .status(403)
       .json({
         message:
-          'Protected super admin credentials cannot be changed here',
+          'Primary protected super admin credentials cannot be reset by another administrator',
       });
   }
 
@@ -1133,7 +1070,10 @@ export async function approveUser(
   await user.save();
 
   return res.json({
-    user,
+    user:
+      safeAdminUser(
+        user,
+      ),
   });
 }
 
@@ -1169,7 +1109,7 @@ export async function rejectUser(
       .status(403)
       .json({
         message:
-          'Protected super admin account cannot be rejected',
+          'Primary protected super admin account cannot be rejected',
       });
   }
 
@@ -1225,7 +1165,11 @@ export async function rejectUser(
 
   return res.json({
     ok: true,
-    user: safe,
+
+    user:
+      safeAdminUser(
+        safe,
+      ),
   });
 }
 
@@ -1283,7 +1227,7 @@ export async function updateRole(
       .status(403)
       .json({
         message:
-          'Protected super admin account cannot be demoted',
+          'Primary protected super admin account cannot be demoted',
       });
   }
 
@@ -1308,7 +1252,10 @@ export async function updateRole(
   await user.save();
 
   return res.json({
-    user,
+    user:
+      safeAdminUser(
+        user,
+      ),
   });
 }
 
@@ -1317,4 +1264,6 @@ export const adminControllerInternals = {
   isProtectedAccount,
   protectedAccountMutation,
   normalizeEmail,
+  isPrimarySuperAdminEmail,
+  safeAdminUser,
 };
