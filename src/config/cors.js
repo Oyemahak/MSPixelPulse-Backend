@@ -38,7 +38,13 @@ export const corsOptions = {
 
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Requested-With',
+    'X-Upload-Token',
+    'Content-Range',
+  ],
   exposedHeaders: ['Content-Type'],
   optionsSuccessStatus: 204,
   preflightContinue: false,

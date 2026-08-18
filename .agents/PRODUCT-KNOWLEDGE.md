@@ -77,7 +77,7 @@ Google Sheets is durable storage, not a low-latency transactional database. Agen
 
 Private Drive files stay private. Browser reads use a backend-authorized file proxy or a short-lived MSPixelPulse signed file URL scoped to one Drive file. Admin access and Client/Developer access must still respect application authorization rules. Never expose Google OAuth secrets or make managed Drive folders public as a workaround.
 
-Small uploads may pass through the API within platform limits. Larger files should use the authorized resumable Google Drive flow. Completion must re-check user/project authorization before metadata becomes active.
+Small uploads may pass through the API within platform limits. Larger files should use the authorized resumable Google Drive flow. For invoices, the API relays bounded chunks using an encrypted, expiring session token so private Google upload URLs remain server-side. Completion must re-check user/project authorization before metadata becomes active.
 
 ## Testing Rule
 

@@ -74,7 +74,6 @@ const upload = multer({
  */
 const DIRECT_UPLOAD_PURPOSES =
   new Set([
-    'invoice',
     'evidence',
     'cover',
     'message',
@@ -1120,7 +1119,7 @@ router.get(
 
       res.setHeader(
         'Content-Disposition',
-        `inline; filename*=UTF-8''${encodeURIComponent(
+        `${req.query?.download === '1' ? 'attachment' : 'inline'}; filename*=UTF-8''${encodeURIComponent(
           downloadName,
         )}`,
       );

@@ -1,14 +1,33 @@
 // backend/src/routes/invoice.routes.js
-import { Router } from "express";
+import { Router, raw } from "express";
 import { requireAuth } from "../middleware/auth.js";
 import {
   listInvoices,
+  listAuthorizedInvoices,
   createInvoice,
   updateInvoice,
   deleteInvoice,
+  startInvoiceUpload,
+  relayInvoiceUploadChunk,
 } from "../features/projects/controllers/invoice.controller.js";
 
 const router = Router();
+
+// GET /api/invoices (role-scoped batch read)
+router.get("/invoices", requireAuth, listAuthorizedInvoices);
+
+// Server-controlled chunk relay keeps the Google resumable URL out of the browser.
+router.post(
+  "/projects/:projectId/invoices/upload-session",
+  requireAuth,
+  startInvoiceUpload,
+);
+router.post(
+  "/projects/:projectId/invoices/upload-chunk",
+  requireAuth,
+  raw({ type: "application/octet-stream", limit: "3mb" }),
+  relayInvoiceUploadChunk,
+);
 
 // GET   /api/projects/:projectId/invoices
 router.get("/projects/:projectId/invoices", requireAuth, listInvoices);

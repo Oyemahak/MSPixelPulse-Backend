@@ -79,7 +79,7 @@ The backend file proxy must perform authorization before streaming private bytes
 
 ## Upload Authorization
 
-Small uploads may pass through the backend within platform body-size limits. Larger uploads should use an authorized Google Drive resumable upload session.
+Small uploads may pass through the backend within platform body-size limits. Larger uploads should use an authorized Google Drive resumable upload session. Invoice uploads use an encrypted, expiring server-issued relay token and bounded chunks through the API; the browser must never receive the Google resumable-session URL.
 
 Upload authorization must bind the session to the authenticated user, project/client scope, declared purpose, file metadata, and completion token. Completion must re-check authorization and validate Drive metadata before recording the file.
 
