@@ -282,6 +282,22 @@ const UserSchema =
         default: null,
         index: true,
       },
+
+      lastActivityAt: {
+        type: Date,
+        default: null,
+        index: true,
+      },
+
+      presenceState: {
+        type: String,
+        enum: [
+          'online',
+          'offline',
+        ],
+        default:
+          'offline',
+      },
     },
     {
       timestamps: true,
@@ -388,6 +404,12 @@ export default createProviderModel(
 
       lastSeenAt:
         '',
+
+      lastActivityAt:
+        '',
+
+      presenceState:
+        'offline',
     },
   },
 );

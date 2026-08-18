@@ -103,7 +103,10 @@ function timestampFromUser(
     !(userOrTimestamp instanceof Date)
   ) {
     return (
+      userOrTimestamp.lastActivityAt ??
       userOrTimestamp.lastSeenAt ??
+      userOrTimestamp.presence
+        ?.lastActivityAt ??
       userOrTimestamp.presence
         ?.lastSeenAt ??
       null
@@ -173,17 +176,39 @@ export function presentPresence(
       timestampFromUser(user),
     );
 
-  return {
-    online:
+  const explicitState =
+    user &&
+    typeof user === 'object'
+      ? String(
+          user.presenceState ||
+            user.presence?.state ||
+            '',
+        ).toLowerCase()
+      : '';
+
+  const online =
       Boolean(
         lastSeenAt,
       ) &&
+      explicitState !==
+        'offline' &&
       isUserOnline(
         lastSeenAt,
         now,
-      ),
+      );
+
+  return {
+    online,
+
+    state:
+      online
+        ? 'online'
+        : 'offline',
 
     lastSeenAt,
+
+    lastActivityAt:
+      lastSeenAt,
   };
 }
 

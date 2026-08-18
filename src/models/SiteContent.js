@@ -1,7 +1,8 @@
 import mongoose from 'mongoose';
 import { createProviderModel } from '../providers/providerModel.js';
 
-export const SITE_CONTENT_KINDS = ['service', 'pricing', 'proof'];
+export const PUBLIC_SITE_CONTENT_KINDS = ['service', 'pricing', 'proof'];
+export const SITE_CONTENT_KINDS = [...PUBLIC_SITE_CONTENT_KINDS, 'invoice-settings'];
 
 const SiteContentSchema = new mongoose.Schema(
   {

@@ -1,10 +1,10 @@
 import { Router } from 'express';
-import SiteContent, { SITE_CONTENT_KINDS } from '../models/SiteContent.js';
+import SiteContent, { PUBLIC_SITE_CONTENT_KINDS } from '../models/SiteContent.js';
 
 const router = Router();
 
 router.get('/:kind', async (req, res) => {
-  if (!SITE_CONTENT_KINDS.includes(req.params.kind)) {
+  if (!PUBLIC_SITE_CONTENT_KINDS.includes(req.params.kind)) {
     return res.status(404).json({ message: 'Content type not found' });
   }
   const items = await SiteContent.find({

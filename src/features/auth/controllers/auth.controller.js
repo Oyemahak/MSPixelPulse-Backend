@@ -284,11 +284,16 @@ export async function login(
      * Login should return the same authVersion that was placed in
      * the newly-issued JWT.
      */
+    const now =
+      new Date().toISOString();
+
     const current =
-      await usersRepository.findById(
+      await usersRepository.updatePresence(
         user._id,
         {
-          fresh: true,
+          lastSeenAt: now,
+          lastActivityAt: now,
+          presenceState: 'online',
         },
       );
 
@@ -326,9 +331,29 @@ export async function login(
  * POST /api/auth/logout
  */
 export async function logout(
-  _req,
+  req,
   res,
 ) {
+  const userId =
+    req.user?._id ||
+    req.user?.id;
+
+  if (userId) {
+    const now =
+      new Date().toISOString();
+
+    await usersRepository
+      .updatePresence(
+        userId,
+        {
+          lastSeenAt: now,
+          lastActivityAt: now,
+          presenceState: 'offline',
+        },
+      )
+      .catch(() => undefined);
+  }
+
   res.clearCookie(
     COOKIE_NAME,
     {

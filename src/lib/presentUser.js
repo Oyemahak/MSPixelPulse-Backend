@@ -1,4 +1,5 @@
 import { signedURL } from './storage.js';
+import { presentPresence } from './presence.js';
 
 export async function presentUser(user) {
   if (!user) return null;
@@ -9,6 +10,18 @@ export async function presentUser(user) {
       : { ...user };
 
   delete value.password;
+
+  value.presence =
+    presentPresence(value);
+
+  value.online =
+    value.presence.online;
+
+  value.lastSeenAt =
+    value.presence.lastSeenAt;
+
+  value.lastActivityAt =
+    value.presence.lastActivityAt;
 
   if (value.avatarPath) {
     try {

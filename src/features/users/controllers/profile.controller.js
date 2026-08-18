@@ -341,7 +341,13 @@ export async function heartbeatPresence(
       await usersRepository
         .updatePresence(
           userId,
-          lastSeenAt,
+          {
+            lastSeenAt,
+            lastActivityAt:
+              lastSeenAt,
+            presenceState:
+              'online',
+          },
         );
 
     if (!user) {

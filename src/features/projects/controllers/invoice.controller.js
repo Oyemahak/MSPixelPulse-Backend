@@ -3,6 +3,7 @@ import crypto from "crypto";
 
 import Invoice from "../../../models/Invoice.js";
 import Project from "../../../models/Project.js";
+import SiteContent from "../../../models/SiteContent.js";
 import { signedURL as createSignedUrl, removeObject as removePath } from "../../../lib/storage.js";
 import {
   cleanFileName,
@@ -23,8 +24,49 @@ import {
   sealInvoiceUploadToken,
 } from "../../../lib/invoiceUploadToken.js";
 
-const VALID_STATUSES = ["draft", "sent", "uploaded", "paid", "archived"];
+const VALID_STATUSES = [
+  "draft",
+  "sent",
+  "uploaded",
+  "partially_paid",
+  "paid",
+  "overdue",
+  "cancelled",
+  "archived",
+];
 const INVOICE_RELAY_CHUNK_BYTES = 2 * 1024 * 1024;
+const MAX_INVOICE_AMOUNT = 100_000_000;
+const MAX_LINE_ITEMS = 50;
+const MAX_PAYMENTS = 50;
+const PAYMENT_METHODS = new Set([
+  "Interac e-Transfer",
+  "Bank transfer",
+  "Cash",
+  "Cheque",
+  "Remitly",
+  "Other",
+]);
+
+const DEFAULT_INVOICE_SETTINGS = {
+  sender: {
+    businessName: "MSPixelPulse",
+    contactName: "",
+    address: "Toronto, Ontario, Canada",
+    phone: "",
+    email: "info@mspixelpulse.com",
+    website: "https://mspixelpulse.com",
+    logoUrl: "https://mspixelpulse.com/icon-light.svg",
+  },
+  currency: "CAD",
+  pageSize: "LETTER",
+  chargeTax: false,
+  taxLabel: "HST",
+  taxRate: 0,
+  taxRegistrationNumber: "",
+  taxNote: "",
+  paymentTerms: "Payment is due by the date shown on this invoice.",
+  defaultNotes: "Thank you for choosing MSPixelPulse.",
+};
 
 function storage() {
   const provider = getStorageProvider();
@@ -41,28 +83,101 @@ function normalizeKind(value) {
   return ['advance', 'final', 'other'].includes(value) ? value : '';
 }
 
+function money(value) {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number)) return 0;
+  return Math.round(Math.min(Math.max(number, 0), MAX_INVOICE_AMOUNT) * 100) / 100;
+}
+
+function percent(value) {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number)) return 0;
+  return Math.round(Math.min(Math.max(number, 0), 100) * 1000) / 1000;
+}
+
+function cleanParty(value = {}) {
+  const party = value && typeof value === "object" ? value : {};
+
+  return {
+    businessName: cleanText(party.businessName, 160),
+    contactName: cleanText(party.contactName || party.name, 160),
+    address: cleanText(party.address, 600),
+    email: cleanText(party.email, 200).toLowerCase(),
+    phone: cleanText(party.phone, 60),
+    website: cleanText(party.website, 300),
+    logoUrl: cleanText(party.logoUrl, 500),
+  };
+}
+
+function normalizePayments(items = []) {
+  if (!Array.isArray(items)) return [];
+
+  return items.slice(0, MAX_PAYMENTS).map((item) => ({
+    amount: money(item?.amount),
+    date: item?.date || new Date().toISOString(),
+    method: PAYMENT_METHODS.has(String(item?.method || ""))
+      ? String(item.method)
+      : "Other",
+    reference: cleanText(item?.reference, 160),
+    note: cleanText(item?.note, 500),
+  })).filter((item) => item.amount > 0);
+}
+
+function normalizePageSize(value) {
+  return String(value || "").toUpperCase() === "A4" ? "A4" : "LETTER";
+}
+
 function invoiceDetails(body = {}) {
   const allowed = [
     'invoiceNumber',
+    'sourceType',
     'title',
     'currency',
     'lineItems',
+    'sender',
+    'clientDetails',
     'subtotal',
+    'discountAmount',
+    'chargeTax',
     'taxLabel',
+    'taxRate',
     'taxAmount',
+    'taxRegistrationNumber',
+    'taxNote',
     'total',
+    'amountPaid',
+    'balanceDue',
+    'payments',
+    'paymentTerms',
     'notes',
+    'internalNotes',
+    'pageSize',
     'isDemo',
     'issueDate',
     'dueDate',
     'status',
   ];
 
-  return Object.fromEntries(
+  const details = Object.fromEntries(
     allowed
       .filter((key) => Object.prototype.hasOwnProperty.call(body, key))
       .map((key) => [key, body[key]]),
   );
+
+  if ('lineItems' in details) details.lineItems = normalizeLineItems(details.lineItems);
+  if ('payments' in details) details.payments = normalizePayments(details.payments);
+  if ('sender' in details) details.sender = cleanParty(details.sender);
+  if ('clientDetails' in details) details.clientDetails = cleanParty(details.clientDetails);
+  if ('subtotal' in details) details.subtotal = money(details.subtotal);
+  if ('discountAmount' in details) details.discountAmount = money(details.discountAmount);
+  if ('taxRate' in details) details.taxRate = percent(details.taxRate);
+  if ('taxAmount' in details) details.taxAmount = money(details.taxAmount);
+  if ('total' in details) details.total = money(details.total);
+  if ('amountPaid' in details) details.amountPaid = money(details.amountPaid);
+  if ('balanceDue' in details) details.balanceDue = money(details.balanceDue);
+  if ('pageSize' in details) details.pageSize = normalizePageSize(details.pageSize);
+
+  return details;
 }
 
 function uploadRange(value, bufferLength, expectedTotal) {
@@ -119,12 +234,13 @@ async function freshInvoiceFile(invoice) {
 function normalizeLineItems(items = []) {
   if (!Array.isArray(items)) return [];
   return items
+    .slice(0, MAX_LINE_ITEMS)
     .map((item) => {
-      const quantity = Number(item.quantity ?? 1);
-      const unitPrice = Number(item.unitPrice ?? 0);
-      const amount = Number(item.amount ?? quantity * unitPrice);
+      const quantity = Math.max(Number(item.quantity ?? 1) || 0, 0);
+      const unitPrice = money(item.unitPrice ?? item.rate ?? 0);
+      const amount = money(quantity * unitPrice);
       return {
-        description: String(item.description || "").trim(),
+        description: cleanText(item.description, 500),
         quantity,
         unitPrice,
         amount,
@@ -133,37 +249,236 @@ function normalizeLineItems(items = []) {
     .filter((item) => item.description);
 }
 
+function calculateInvoiceTotals(details = {}, existing = {}) {
+  const lineItems = Array.isArray(details.lineItems)
+    ? details.lineItems
+    : Array.isArray(existing.lineItems)
+      ? normalizeLineItems(existing.lineItems)
+      : [];
+  const lineSubtotal = money(
+    lineItems.reduce((sum, item) => sum + Number(item.amount || 0), 0),
+  );
+  const suppliedSubtotal = money(details.subtotal ?? existing.subtotal ?? details.total ?? existing.total);
+  const subtotal = lineItems.length ? lineSubtotal : suppliedSubtotal;
+  const discountAmount = Math.min(
+    money(details.discountAmount ?? existing.discountAmount),
+    subtotal,
+  );
+  const chargeTax = 'chargeTax' in details
+    ? Boolean(details.chargeTax)
+    : Boolean(existing.chargeTax);
+  const taxRate = chargeTax
+    ? percent(details.taxRate ?? existing.taxRate)
+    : 0;
+  const taxable = money(subtotal - discountAmount);
+  const calculatedTax = money(taxable * taxRate / 100);
+  const taxAmount = chargeTax ? calculatedTax : 0;
+  const calculatedTotal = money(taxable + taxAmount);
+  const suppliedTotal = money(details.total ?? existing.total);
+  const total = lineItems.length || chargeTax || discountAmount > 0
+    ? calculatedTotal
+    : suppliedTotal || calculatedTotal;
+  const payments = Array.isArray(details.payments)
+    ? details.payments
+    : normalizePayments(existing.payments || []);
+  const recordedPayments = money(
+    payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0),
+  );
+  const amountPaid = payments.length
+    ? recordedPayments
+    : money(details.amountPaid ?? existing.amountPaid);
+
+  return {
+    lineItems,
+    subtotal,
+    discountAmount,
+    chargeTax,
+    taxRate,
+    taxAmount,
+    total,
+    payments,
+    amountPaid,
+    balanceDue: money(Math.max(total - amountPaid, 0)),
+  };
+}
+
+function automaticStatus({ requested, fallback = 'draft', total, amountPaid, dueDate }) {
+  if (requested && VALID_STATUSES.includes(requested)) return requested;
+  if (total > 0 && amountPaid >= total) return 'paid';
+  if (amountPaid > 0) return 'partially_paid';
+
+  const due = dueDate ? new Date(dueDate) : null;
+  if (
+    due &&
+    !Number.isNaN(due.getTime()) &&
+    due.getTime() < Date.now() &&
+    !['draft', 'cancelled', 'archived'].includes(fallback)
+  ) {
+    return 'overdue';
+  }
+
+  return VALID_STATUSES.includes(fallback) ? fallback : 'draft';
+}
+
 function buildInvoicePayload(body = {}, project, user, existing = {}) {
-  const lineItems = "lineItems" in body ? normalizeLineItems(body.lineItems) : existing.lineItems;
-  const subtotal =
-    "subtotal" in body
-      ? Number(body.subtotal || 0)
-      : Array.isArray(lineItems)
-        ? lineItems.reduce((sum, item) => sum + Number(item.amount || 0), 0)
-        : existing.subtotal;
-  const taxAmount = "taxAmount" in body ? Number(body.taxAmount || 0) : Number(existing.taxAmount || 0);
-  const total = "total" in body ? Number(body.total || 0) : Number(subtotal || 0) + taxAmount;
+  const details = invoiceDetails(body);
+  const totals = calculateInvoiceTotals(details, existing);
 
   const payload = {
     client: project.client || existing.client || null,
-    kind: body.kind || existing.kind || "advance",
-    invoiceNumber: cleanText(body.invoiceNumber ?? existing.invoiceNumber ?? "", 80),
-    title: cleanText(body.title ?? existing.title ?? "", 160),
-    currency: body.currency ?? existing.currency ?? "CAD",
-    lineItems,
-    subtotal,
-    taxLabel: body.taxLabel ?? existing.taxLabel ?? "",
-    taxAmount,
-    total,
-    notes: cleanText(body.notes ?? existing.notes ?? "", 2000),
-    isDemo: body.isDemo ?? existing.isDemo ?? false,
+    kind: body.kind || existing.kind || "other",
+    sourceType: ['generated', 'uploaded'].includes(details.sourceType)
+      ? details.sourceType
+      : existing.sourceType || 'uploaded',
+    invoiceNumber: cleanText(details.invoiceNumber ?? existing.invoiceNumber ?? "", 80),
+    title: cleanText(details.title ?? existing.title ?? "", 160),
+    currency: cleanText(details.currency ?? existing.currency ?? "CAD", 3).toUpperCase() || "CAD",
+    sender: details.sender ?? existing.sender ?? {},
+    clientDetails: details.clientDetails ?? existing.clientDetails ?? {},
+    ...totals,
+    taxLabel: cleanText(details.taxLabel ?? existing.taxLabel ?? "", 80),
+    taxRegistrationNumber: cleanText(details.taxRegistrationNumber ?? existing.taxRegistrationNumber ?? "", 120),
+    taxNote: cleanText(details.taxNote ?? existing.taxNote ?? "", 600),
+    paymentTerms: cleanText(details.paymentTerms ?? existing.paymentTerms ?? "", 1000),
+    notes: cleanText(details.notes ?? existing.notes ?? "", 2000),
+    internalNotes: cleanText(details.internalNotes ?? existing.internalNotes ?? "", 2000),
+    pageSize: normalizePageSize(details.pageSize ?? existing.pageSize),
+    isDemo: Boolean(details.isDemo ?? existing.isDemo ?? false),
   };
 
-  if ("issueDate" in body) payload.issueDate = body.issueDate ? new Date(body.issueDate) : null;
-  if ("dueDate" in body) payload.dueDate = body.dueDate ? new Date(body.dueDate) : null;
+  if ("issueDate" in details) payload.issueDate = details.issueDate ? new Date(details.issueDate) : null;
+  if ("dueDate" in details) payload.dueDate = details.dueDate ? new Date(details.dueDate) : null;
   if (body.file?.path) payload.file = body.file;
   if (user?._id && !existing.uploadedBy) payload.uploadedBy = user._id;
   return payload;
+}
+
+function normalizeInvoiceSettings(value = {}) {
+  const source = value && typeof value === 'object' ? value : {};
+
+  return {
+    sender: cleanParty({
+      ...DEFAULT_INVOICE_SETTINGS.sender,
+      ...(source.sender || {}),
+    }),
+    currency: cleanText(source.currency || DEFAULT_INVOICE_SETTINGS.currency, 3).toUpperCase() || 'CAD',
+    pageSize: normalizePageSize(source.pageSize || DEFAULT_INVOICE_SETTINGS.pageSize),
+    chargeTax: Boolean(source.chargeTax),
+    taxLabel: cleanText(source.taxLabel || DEFAULT_INVOICE_SETTINGS.taxLabel, 80),
+    taxRate: percent(source.taxRate),
+    taxRegistrationNumber: cleanText(source.taxRegistrationNumber, 120),
+    taxNote: cleanText(source.taxNote, 600),
+    paymentTerms: cleanText(source.paymentTerms || DEFAULT_INVOICE_SETTINGS.paymentTerms, 1000),
+    defaultNotes: cleanText(source.defaultNotes || DEFAULT_INVOICE_SETTINGS.defaultNotes, 2000),
+  };
+}
+
+async function nextInvoiceNumber() {
+  const year = new Date().getUTCFullYear();
+  const prefix = `MSP-${year}-`;
+  const rows = await Invoice.find({
+    invoiceNumber: {
+      $regex: `^${prefix}\\d+$`,
+      $options: 'i',
+    },
+  }).select('invoiceNumber').lean();
+  const highest = rows.reduce((max, row) => {
+    const value = Number(String(row.invoiceNumber || '').slice(prefix.length));
+    return Number.isSafeInteger(value) ? Math.max(max, value) : max;
+  }, 0);
+
+  return `${prefix}${String(highest + 1).padStart(4, '0')}`;
+}
+
+async function invoiceNumberFor(requested, excludeId = '') {
+  const value = cleanText(requested, 80) || await nextInvoiceNumber();
+  const duplicate = await Invoice.findOne({
+    invoiceNumber: value,
+    ...(excludeId ? { _id: { $ne: excludeId } } : {}),
+  }).select('_id').lean();
+
+  if (duplicate) {
+    const error = new Error('Invoice number is already in use');
+    error.status = 409;
+    error.code = 'INVOICE_NUMBER_CONFLICT';
+    throw error;
+  }
+
+  return value;
+}
+
+function clientSafeInvoice(invoice, role) {
+  const value = invoice?.toObject?.() || { ...invoice };
+  if (role !== 'admin') delete value.internalNotes;
+  return value;
+}
+
+// GET /api/invoice-settings
+export async function getInvoiceSettings(req, res, next) {
+  try {
+    if (req.user?.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin only' });
+    }
+
+    const record = await SiteContent.findOne({
+      kind: 'invoice-settings',
+      key: 'default',
+    }).lean();
+
+    return res.json({
+      settings: normalizeInvoiceSettings(record?.payload || DEFAULT_INVOICE_SETTINGS),
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+// PATCH /api/invoice-settings
+export async function updateInvoiceSettings(req, res, next) {
+  try {
+    if (req.user?.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin only' });
+    }
+
+    const settings = normalizeInvoiceSettings(req.body || {});
+    let record = await SiteContent.findOne({
+      kind: 'invoice-settings',
+      key: 'default',
+    });
+
+    if (record) {
+      record.payload = settings;
+      record.title = 'Invoice defaults';
+      record.published = false;
+      await record.save();
+    } else {
+      record = await SiteContent.create({
+        kind: 'invoice-settings',
+        key: 'default',
+        title: 'Invoice defaults',
+        payload: settings,
+        published: false,
+        displayOrder: 0,
+      });
+    }
+
+    return res.json({ ok: true, settings });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+// GET /api/invoices/next-number
+export async function getNextInvoiceNumber(req, res, next) {
+  try {
+    if (req.user?.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin only' });
+    }
+
+    return res.json({ invoiceNumber: await nextInvoiceNumber() });
+  } catch (error) {
+    return next(error);
+  }
 }
 
 // GET /api/projects/:projectId/invoices
@@ -173,10 +488,17 @@ export async function listInvoices(req, res, next) {
     const project = await Project.findById(projectId).lean();
     if (!project) return res.status(404).json({ error: "Project not found" });
     if (!canReadProject(req.user, project)) return projectAccessError(res);
-    const filter = { project: projectId, status: { $ne: "archived" } };
+    const filter = {
+      project: projectId,
+      status: req.user?.role === 'client'
+        ? { $nin: ['archived', 'draft'] }
+        : { $ne: 'archived' },
+    };
     const rows = await Invoice.find(filter).sort({ createdAt: -1 }).lean();
     await Promise.all(rows.map(freshInvoiceFile));
-    res.json({ invoices: rows });
+    res.json({
+      invoices: rows.map((invoice) => clientSafeInvoice(invoice, req.user?.role)),
+    });
   } catch (err) {
     next(err);
   }
@@ -200,14 +522,18 @@ export async function listAuthorizedInvoices(req, res, next) {
 
     const rows = await Invoice.find({
       project: { $in: projectIds },
-      status: { $ne: 'archived' },
+      status: req.user?.role === 'client'
+        ? { $nin: ['archived', 'draft'] }
+        : { $ne: 'archived' },
     })
       .sort({ createdAt: -1 })
       .lean();
 
     await Promise.all(rows.map(freshInvoiceFile));
 
-    return res.json({ invoices: rows });
+    return res.json({
+      invoices: rows.map((invoice) => clientSafeInvoice(invoice, req.user?.role)),
+    });
   } catch (error) {
     return next(error);
   }
@@ -232,7 +558,7 @@ export async function startInvoiceUpload(req, res, next) {
     const originalName = String(req.body?.name || '');
     const mimetype = String(req.body?.type || '').toLowerCase();
     const size = Number(req.body?.size || 0);
-    const kind = normalizeKind(req.body?.kind || 'advance');
+    const kind = normalizeKind(req.body?.kind || 'other');
     const invoiceId = String(req.body?.invoiceId || '');
     const verdict = validateUpload(
       { originalname: originalName, mimetype, size },
@@ -247,19 +573,13 @@ export async function startInvoiceUpload(req, res, next) {
     if (invoiceId) {
       existing = await Invoice.findOne({ _id: invoiceId, project: projectId }).lean();
       if (!existing) return res.status(404).json({ error: 'Invoice not found' });
-    } else {
-      existing = await Invoice.findOne({
-        project: projectId,
-        kind,
-        status: { $ne: 'archived' },
-      }).lean();
-
-      if (existing) {
-        return res.status(409).json({
-          error: 'An active invoice already exists. Replace its file or delete it first.',
-        });
-      }
     }
+
+    const invoice = invoiceDetails(req.body?.invoice || {});
+    invoice.invoiceNumber = await invoiceNumberFor(
+      invoice.invoiceNumber || existing?.invoiceNumber,
+      invoiceId,
+    );
 
     const logicalPath = relayUploadPath(projectId, originalName);
     const userId = String(req.user._id);
@@ -285,7 +605,7 @@ export async function startInvoiceUpload(req, res, next) {
       purpose: 'invoice',
       kind,
       invoiceId,
-      invoice: invoiceDetails(req.body?.invoice || {}),
+      invoice,
       logicalPath,
       uploadUrl: session.uploadUrl,
       uploadNonce: session.uploadNonce,
@@ -404,14 +724,15 @@ export async function relayInvoiceUploadChunk(req, res, next) {
         req.user,
         invoice.toObject(),
       );
-      const requestedStatus = claims.invoice?.status;
-
-      if (requestedStatus && VALID_STATUSES.includes(requestedStatus)) {
-        patch.status = requestedStatus;
-        patch.paidAt = requestedStatus === 'paid' ? new Date() : null;
-      } else if (invoice.status === 'draft') {
-        patch.status = 'uploaded';
-      }
+      patch.status = automaticStatus({
+        requested: claims.invoice?.status,
+        fallback: invoice.status === 'draft' ? 'uploaded' : invoice.status,
+        total: patch.total,
+        amountPaid: patch.amountPaid,
+        dueDate: patch.dueDate || invoice.dueDate,
+      });
+      patch.paidAt = patch.status === 'paid' ? invoice.paidAt || new Date() : null;
+      patch.sentAt = patch.status === 'sent' ? invoice.sentAt || new Date() : invoice.sentAt;
 
       Object.assign(invoice, patch);
       await invoice.save();
@@ -429,34 +750,28 @@ export async function relayInvoiceUploadChunk(req, res, next) {
         }
       }
     } else {
-      const duplicate = await Invoice.findOne({
-        project: projectId,
-        kind: claims.kind,
-        status: { $ne: 'archived' },
-      }).select('_id').lean();
-
-      if (duplicate) {
-        await fileStorage.removePath(uploaded.path);
-        uploadedPath = '';
-        return res.status(409).json({
-          error: 'An active invoice already exists. Replace its file or delete it first.',
-        });
-      }
-
-      const requestedStatus = claims.invoice?.status;
-      const status = requestedStatus && VALID_STATUSES.includes(requestedStatus)
-        ? requestedStatus
-        : 'uploaded';
+      claims.invoice.invoiceNumber = await invoiceNumberFor(
+        claims.invoice?.invoiceNumber,
+      );
+      const payload = buildInvoicePayload(
+        { ...claims.invoice, kind: claims.kind, file },
+        project,
+        req.user,
+      );
+      const status = automaticStatus({
+        requested: claims.invoice?.status,
+        fallback: 'uploaded',
+        total: payload.total,
+        amountPaid: payload.amountPaid,
+        dueDate: payload.dueDate,
+      });
 
       invoice = await Invoice.create({
         project: projectId,
-        ...buildInvoicePayload(
-          { ...claims.invoice, kind: claims.kind, file },
-          project,
-          req.user,
-        ),
+        ...payload,
         status,
         paidAt: status === 'paid' ? new Date() : null,
+        sentAt: status === 'sent' ? new Date() : null,
       });
     }
 
@@ -486,7 +801,7 @@ export async function createInvoice(req, res, next) {
 
     const body = req.body || {};
     const file = body.file;
-    const kind = normalizeKind(body.kind || 'advance');
+    const kind = normalizeKind(body.kind || 'other');
     if (!kind) return res.status(400).json({ error: 'Invalid invoice kind' });
     const hasInvoiceDetails =
       body.invoiceNumber ||
@@ -501,21 +816,22 @@ export async function createInvoice(req, res, next) {
       return res.status(400).json({ error: "Invoice details or file {path,url,name,type,size} required" });
     }
 
-    const requestedStatus = req.user.role === "admin" ? body.status : null;
-    const status = requestedStatus && VALID_STATUSES.includes(requestedStatus)
-      ? requestedStatus
-      : file?.path
-        ? "uploaded"
-        : "draft";
-
-    const duplicate = await Invoice.findOne({ project: projectId, kind, status: { $ne: 'archived' } }).select('_id').lean();
-    if (duplicate) return res.status(409).json({ error: 'Delete the current invoice before uploading a replacement' });
+    body.invoiceNumber = await invoiceNumberFor(body.invoiceNumber);
+    const payload = buildInvoicePayload({ ...body, kind }, project, req.user);
+    const status = automaticStatus({
+      requested: req.user.role === 'admin' ? body.status : null,
+      fallback: file?.path ? 'uploaded' : 'draft',
+      total: payload.total,
+      amountPaid: payload.amountPaid,
+      dueDate: payload.dueDate,
+    });
 
     const doc = await Invoice.create({
       project: projectId,
-      ...buildInvoicePayload({ ...body, kind }, project, req.user),
+      ...payload,
       status,
       paidAt: status === "paid" ? new Date() : null,
+      sentAt: status === "sent" ? new Date() : null,
     });
     res.status(201).json({ ok: true, invoice: doc });
   } catch (err) {
@@ -533,12 +849,22 @@ export async function updateInvoice(req, res, next) {
     if (!doc) return res.status(404).json({ error: "Invoice not found" });
 
     if (body.file) return res.status(400).json({ error: 'Use delete and re-upload to replace an invoice file' });
-    const patch = buildInvoicePayload(body, { client: doc.client }, req.user, doc.toObject());
-    if (body.status) {
-      if (!VALID_STATUSES.includes(body.status)) return res.status(400).json({ error: "Invalid status" });
-      patch.status = body.status;
-      patch.paidAt = body.status === "paid" ? new Date() : null;
+    if (body.invoiceNumber) {
+      body.invoiceNumber = await invoiceNumberFor(body.invoiceNumber, invoiceId);
     }
+    const patch = buildInvoicePayload(body, { client: doc.client }, req.user, doc.toObject());
+    if (body.status && !VALID_STATUSES.includes(body.status)) {
+      return res.status(400).json({ error: "Invalid status" });
+    }
+    patch.status = automaticStatus({
+      requested: body.status,
+      fallback: doc.status,
+      total: patch.total,
+      amountPaid: patch.amountPaid,
+      dueDate: patch.dueDate || doc.dueDate,
+    });
+    patch.paidAt = patch.status === "paid" ? doc.paidAt || new Date() : null;
+    patch.sentAt = patch.status === "sent" ? doc.sentAt || new Date() : doc.sentAt;
 
     Object.assign(doc, patch);
     await doc.save();
@@ -570,6 +896,10 @@ export async function deleteInvoice(req, res, next) {
 
 export const invoiceUploadInternals = {
   INVOICE_RELAY_CHUNK_BYTES,
+  VALID_STATUSES,
+  automaticStatus,
+  calculateInvoiceTotals,
   invoiceDetails,
+  normalizeInvoiceSettings,
   uploadRange,
 };

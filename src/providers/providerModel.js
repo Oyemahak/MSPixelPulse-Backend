@@ -126,6 +126,7 @@ function selectedRecord(record, selection) {
 }
 
 function hydrateDates(value, key = '') {
+  if (value instanceof Date) return new Date(value.getTime());
   if (Array.isArray(value)) return value.map((item) => hydrateDates(item, key));
   if (!value || typeof value !== 'object') {
     if (typeof value === 'string' && /(At|Date|Time)$/.test(key) && /^\d{4}-\d{2}-\d{2}T/.test(value)) {
@@ -475,6 +476,7 @@ export function createProviderModel(mongooseModel, config) {
 }
 
 export const providerModelInternals = {
+  hydrateDates,
   matchesMongoFilter,
   selectedRecord,
   updateValue,

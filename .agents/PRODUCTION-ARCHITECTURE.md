@@ -190,7 +190,8 @@ For Admin, Client, and Developer as applicable verify:
 - avatar upload/replace/delete
 - project CRUD and assignments
 - requirement/file upload/read/delete
-- invoice upload/read/status/delete/re-upload
+- generated invoice metadata and PDF upload, existing invoice upload, read/download, payment/status updates, delete/re-upload, private defaults, and client isolation
+- persisted login/heartbeat/logout presence with explicit offline precedence and normalized last activity
 - rooms/messages persistence
 - message attachments
 - support/task/content actions where exposed
@@ -203,6 +204,8 @@ For file operations additionally verify:
 - unauthorized users cannot read it
 - deletion removes both storage object and metadata when product semantics require permanent deletion
 - replacement does not leave the previous object as an unintended active file
+
+For invoice workflows additionally verify calculated line totals, discounts, optional tax, payments/balances, automatic status transitions, unique numbering, private settings, client-safe serialization, and secure file replacement cleanup.
 
 ## Deployment Rules
 

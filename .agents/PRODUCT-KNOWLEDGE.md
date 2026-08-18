@@ -79,6 +79,16 @@ Private Drive files stay private. Browser reads use a backend-authorized file pr
 
 Small uploads may pass through the API within platform limits. Larger files should use the authorized resumable Google Drive flow. For invoices, the API relays bounded chunks using an encrypted, expiring session token so private Google upload URLs remain server-side. Completion must re-check user/project authorization before metadata becomes active.
 
+## Billing And Invoice Contract
+
+Admin billing supports generated branded PDFs and uploaded external invoices as separate source types. Invoice records persist sender/client identity, line items, discounts, optional tax, totals, payments, balances, notes, paper size, status, and private internal notes. Invoice defaults are stored as unpublished private site content and must never be returned from public content routes.
+
+Tax is off by default. Never copy sample GST/HST registration details, small-supplier statements, legal claims, or tax status into production configuration without explicit business-owner input. Client reads exclude drafts, archives, and `internalNotes`; all file access remains scoped to authorized projects and backend-signed Drive access.
+
+## Presence Contract
+
+User records persist `lastActivityAt`, `lastSeenAt`, and `presenceState`. Login and heartbeat mark online activity; authenticated logout marks explicit offline state. Presence presentation gives explicit offline state precedence over timestamp freshness and safely reports missing or malformed activity as offline.
+
 ## Testing Rule
 
 Unit tests are necessary but not sufficient. For changes affecting roles, auth, persistence, files, or portal CRUD, verify the relevant disposable Admin/Developer/Client workflow against the Google-backed runtime and remove all test data afterward.

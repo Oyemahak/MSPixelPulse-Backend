@@ -10,6 +10,7 @@ import {
 } from '../controllers/auth.controller.js';
 
 import {
+  optionalAuth,
   requireAuth,
 } from '../../../middleware/auth.js';
 
@@ -22,6 +23,7 @@ router.post(
 
 router.post(
   '/logout',
+  optionalAuth,
   logout,
 );
 

@@ -162,7 +162,11 @@ test(
       ),
       {
         online: true,
+        state:
+          'online',
         lastSeenAt:
+          '2026-08-16T21:59:30.000Z',
+        lastActivityAt:
           '2026-08-16T21:59:30.000Z',
       },
     );
@@ -177,8 +181,33 @@ test(
       ),
       {
         online: false,
+        state:
+          'offline',
         lastSeenAt:
           null,
+        lastActivityAt:
+          null,
+      },
+    );
+
+    assert.deepEqual(
+      presentPresence(
+        {
+          lastActivityAt:
+            '2026-08-16T21:59:30.000Z',
+          presenceState:
+            'offline',
+        },
+        NOW,
+      ),
+      {
+        online: false,
+        state:
+          'offline',
+        lastSeenAt:
+          '2026-08-16T21:59:30.000Z',
+        lastActivityAt:
+          '2026-08-16T21:59:30.000Z',
       },
     );
   },

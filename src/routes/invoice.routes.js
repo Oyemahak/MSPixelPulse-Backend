@@ -4,6 +4,9 @@ import { requireAuth } from "../middleware/auth.js";
 import {
   listInvoices,
   listAuthorizedInvoices,
+  getInvoiceSettings,
+  updateInvoiceSettings,
+  getNextInvoiceNumber,
   createInvoice,
   updateInvoice,
   deleteInvoice,
@@ -15,6 +18,9 @@ const router = Router();
 
 // GET /api/invoices (role-scoped batch read)
 router.get("/invoices", requireAuth, listAuthorizedInvoices);
+router.get("/invoices/next-number", requireAuth, getNextInvoiceNumber);
+router.get("/invoice-settings", requireAuth, getInvoiceSettings);
+router.patch("/invoice-settings", requireAuth, updateInvoiceSettings);
 
 // Server-controlled chunk relay keeps the Google resumable URL out of the browser.
 router.post(

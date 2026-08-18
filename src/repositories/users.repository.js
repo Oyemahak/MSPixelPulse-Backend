@@ -66,8 +66,7 @@ export class UsersRepository {
 
   async updatePresence(
     id,
-    lastSeenAt =
-      new Date().toISOString(),
+    presence = {},
   ) {
     if (!id) {
       return null;
@@ -77,14 +76,35 @@ export class UsersRepository {
      * Presence may only update the heartbeat timestamp.
      * Never merge arbitrary request data here.
      */
+    const timestamp =
+      typeof presence === 'string'
+        ? presence
+        : presence.lastActivityAt ||
+          presence.lastSeenAt ||
+          new Date().toISOString();
+
+    const state =
+      typeof presence === 'object' &&
+      presence.presenceState === 'offline'
+        ? 'offline'
+        : 'online';
+
     return this.present(
       await this.google.update(
         id,
         {
           lastSeenAt:
             String(
-              lastSeenAt,
+              timestamp,
             ),
+
+          lastActivityAt:
+            String(
+              timestamp,
+            ),
+
+          presenceState:
+            state,
         },
       ),
     );
@@ -348,6 +368,19 @@ export class UsersRepository {
         user.lastSeenAt ||
           '',
       );
+
+    user.lastActivityAt =
+      String(
+        user.lastActivityAt ||
+          user.lastSeenAt ||
+          '',
+      );
+
+    user.presenceState =
+      user.presenceState ===
+        'online'
+        ? 'online'
+        : 'offline';
 
     if (
       credentials &&

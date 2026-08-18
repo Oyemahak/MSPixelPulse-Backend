@@ -19,3 +19,16 @@ test('provider model update applies Mongo-style set, push, pull, and increments'
   });
   assert.deepEqual(updated, { id: 'a', values: ['y'], count: 3, status: 'active' });
 });
+
+test('provider date hydration is idempotent across list query mapping', () => {
+  const first = providerModelInternals.hydrateDates({
+    issueDate: '2026-08-18T00:00:00.000Z',
+    dueDate: '2026-09-01T00:00:00.000Z',
+  });
+  const second = providerModelInternals.hydrateDates(first);
+
+  assert.ok(second.issueDate instanceof Date);
+  assert.ok(second.dueDate instanceof Date);
+  assert.equal(second.issueDate.toISOString(), '2026-08-18T00:00:00.000Z');
+  assert.equal(second.dueDate.toISOString(), '2026-09-01T00:00:00.000Z');
+});

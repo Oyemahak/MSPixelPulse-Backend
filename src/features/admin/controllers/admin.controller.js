@@ -22,6 +22,10 @@ import {
   deleteUserPermanently,
 } from '../../../lib/deleteUserPermanently.js';
 
+import {
+  presentPresence,
+} from '../../../lib/presence.js';
+
 const ADMIN_ONLY_FIELDS = [
   'isSuperAdmin',
   'isProtected',
@@ -100,8 +104,25 @@ function safeAdminUser(user) {
       value.email,
     );
 
+  const presence =
+    presentPresence(value);
+
   return {
     ...value,
+
+    lastSeenAt:
+      presence.lastSeenAt,
+
+    lastActivityAt:
+      presence.lastActivityAt,
+
+    presenceState:
+      presence.state,
+
+    presence,
+
+    online:
+      presence.online,
 
     isSuperAdmin:
       primary ||

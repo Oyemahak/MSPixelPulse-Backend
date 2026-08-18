@@ -98,6 +98,8 @@ function presentPeer(user) {
             : 'Client',
     avatarUrl: user.avatarUrl || '',
     lastSeenAt: presence.lastSeenAt,
+    lastActivityAt: presence.lastActivityAt,
+    presenceState: presence.state,
     presence,
     online: presence.online,
   };
@@ -111,7 +113,7 @@ export async function listAuthorizedDirectPeers(currentUser) {
     accountStatus: { $ne: 'suspended' },
   })
     .select(
-      '_id name email role status accountStatus avatarUrl lastSeenAt isSuperAdmin isProtected',
+      '_id name email role status accountStatus avatarUrl lastSeenAt lastActivityAt presenceState isSuperAdmin isProtected',
     )
     .sort({ role: 1, name: 1 })
     .lean();
