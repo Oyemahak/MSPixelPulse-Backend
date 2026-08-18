@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import {
   messageTimestampFrom,
   normalizeMessageTimestamp,
+  timestampFromObjectId,
   withCanonicalMessageTimestamp,
 } from './messageTimestamp.js';
 
@@ -106,6 +107,36 @@ test(
           '2026-08-16T19:00:00.000Z',
       }),
       '2026-08-16T19:00:00.000Z',
+    );
+  },
+);
+
+test(
+  'recovers a factual creation time from legacy Mongo ObjectIds',
+  () => {
+    assert.equal(
+      timestampFromObjectId(
+        '6a7f4b88c8a17a19595292f0',
+      ),
+      '2026-08-14T17:08:24.000Z',
+    );
+
+    assert.equal(
+      messageTimestampFrom({
+        _id:
+          '6a7f4b88c8a17a19595292f0',
+
+        sentAt: {},
+        createdAt: {},
+      }),
+      '2026-08-14T17:08:24.000Z',
+    );
+
+    assert.equal(
+      timestampFromObjectId(
+        'd02cea4b-71a6-4f76-ac90-095fe95b5fa5',
+      ),
+      null,
     );
   },
 );

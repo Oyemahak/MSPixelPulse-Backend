@@ -76,6 +76,22 @@ export function normalizeMessageTimestamp(value) {
   return date.toISOString();
 }
 
+export function timestampFromObjectId(value) {
+  const id = String(value || '').trim();
+
+  if (!/^[a-f\d]{24}$/i.test(id)) {
+    return null;
+  }
+
+  const timestamp = Number.parseInt(id.slice(0, 8), 16) * 1000;
+  const date = new Date(timestamp);
+  const year = date.getUTCFullYear();
+
+  return year >= 2000 && year <= 2100
+    ? date.toISOString()
+    : null;
+}
+
 export function messageTimestampFrom(record = {}) {
   if (!record) {
     return null;
@@ -93,6 +109,9 @@ export function messageTimestampFrom(record = {}) {
     ) ||
     normalizeMessageTimestamp(
       record.ts,
+    ) ||
+    timestampFromObjectId(
+      record._id || record.id,
     ) ||
     null
   );
