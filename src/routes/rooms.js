@@ -15,6 +15,11 @@ import {
 } from "../lib/messagePolicy.js";
 
 import {
+  normalizeMessageTimestamp,
+  withCanonicalMessageTimestamp,
+} from "../lib/messageTimestamp.js";
+
+import {
   canReadProject,
   projectAccessError,
 } from "../lib/projectAccess.js";
@@ -31,7 +36,7 @@ async function presentRoomMessage(value) {
       ? value.toObject()
       : value;
 
-  return {
+  return withCanonicalMessageTimestamp({
     ...message,
 
     attachments:
@@ -72,7 +77,7 @@ async function presentRoomMessage(value) {
           },
         ),
       ),
-  };
+  });
 }
 
 /**
@@ -149,9 +154,25 @@ router.get(
     };
 
     if (before) {
+      const normalizedBefore =
+        normalizeMessageTimestamp(
+          before,
+        );
+
+      if (!normalizedBefore) {
+        return res
+          .status(400)
+          .json({
+            error:
+              "Invalid before timestamp",
+          });
+      }
+
       query.sentAt = {
         $lt:
-          new Date(before),
+          new Date(
+            normalizedBefore,
+          ),
       };
     }
 
@@ -290,6 +311,10 @@ router.post(
         });
     }
 
+    const sentAt =
+      new Date()
+        .toISOString();
+
     const messageRecord =
       await Message.create({
         kind: "room",
@@ -323,10 +348,12 @@ router.post(
         readBy: [
           req.user._id,
         ],
+
+        sentAt,
       });
 
     room.lastMessageAt =
-      messageRecord.sentAt;
+      sentAt;
 
     await room.save();
 

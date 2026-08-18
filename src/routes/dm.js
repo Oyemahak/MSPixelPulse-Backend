@@ -9,8 +9,6 @@ import {
 
 import Thread from '../models/Thread.js';
 import Message from '../models/Message.js';
-import User from '../models/User.js';
-
 import {
   boundedMessageLimit,
   normalizeMessageBody,
@@ -25,6 +23,11 @@ import {
 import {
   notifySuperAdminOfPortalMessage,
 } from '../lib/portalMessageNotification.js';
+
+import {
+  listAuthorizedDirectPeers,
+  peerIdFromThread,
+} from '../lib/directMessageAccess.js';
 
 const router =
   express.Router();
@@ -59,61 +62,33 @@ function presentDirectMessage(value) {
   );
 }
 
-function peerRolesFor(role) {
-  if (
-    role === 'admin'
-  ) {
-    return [
-      'admin',
-      'developer',
-      'client',
-    ];
-  }
-
-  if (
-    role ===
-    'developer'
-  ) {
-    return [
-      'admin',
-      'developer',
-    ];
-  }
-
-  return [
-    'admin',
-  ];
+function previewText(value) {
+  return String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 140);
 }
 
-async function findPeerForThread(
-  thread,
-  currentUserId,
-) {
-  const peerId =
-    (
-      thread.participants ||
-      []
-    )
-      .map(String)
-      .find(
-        (participantId) =>
-          participantId !==
-          String(
-            currentUserId,
-          ),
-      );
+function peerMap(peers = []) {
+  return new Map(
+    peers.map((peer) => [String(peer._id), peer]),
+  );
+}
 
-  if (!peerId) {
-    return null;
-  }
+async function authorizedThread(req, threadId) {
+  const thread = await Thread.findById(threadId);
 
-  return User.findById(
-    peerId,
-  )
-    .select(
-      '_id name email role status accountStatus lastSeenAt',
-    )
-    .lean();
+  if (!thread) return null;
+
+  const me = String(req.user?._id || '');
+  const participantIds = (thread.participants || []).map(String);
+
+  if (!participantIds.includes(me)) return null;
+
+  const peers = await listAuthorizedDirectPeers(req.user);
+  const peer = peerMap(peers).get(peerIdFromThread(thread, me));
+
+  return peer ? { thread, peer } : null;
 }
 
 async function sendDirectNotification({
@@ -170,30 +145,16 @@ router.post(
         req.body ||
         {};
 
-      const peerRoles =
-        peerRolesFor(
-          req.user.role,
+      const peers =
+        await listAuthorizedDirectPeers(
+          req.user,
         );
 
       const peer =
-        await User.findOne({
-          _id:
-            peerId,
-
-          role: {
-            $in:
-              peerRoles,
-          },
-
-          status:
-            'active',
-
-          accountStatus: {
-            $ne:
-              'suspended',
-          },
-        }).select(
-          '_id role',
+        peers.find(
+          (candidate) =>
+            String(candidate._id) ===
+            String(peerId || ''),
         );
 
       if (
@@ -203,10 +164,10 @@ router.post(
         ) === me
       ) {
         return res
-          .status(400)
+          .status(404)
           .json({
             error:
-              'invalid peer',
+              'not found',
           });
       }
 
@@ -277,6 +238,8 @@ router.post(
       return res.json({
         threadId:
           thread._id,
+
+        peer,
       });
     } catch (error) {
       return next(error);
@@ -301,29 +264,98 @@ router.get(
           req.user._id,
         );
 
-      const threads =
-        await Thread.find({
-          participants:
-            me,
-        })
-          .sort({
-            lastMessageAt:
-              -1,
+      const [threads, peers] =
+        await Promise.all([
+          Thread.find({
+            participants:
+              me,
           })
-          .lean();
+            .sort({
+              lastMessageAt:
+                -1,
+            })
+            .lean(),
+
+          listAuthorizedDirectPeers(
+            req.user,
+          ),
+        ]);
+
+      const peersById =
+        peerMap(peers);
+
+      const authorizedThreads =
+        threads.filter((thread) =>
+          peersById.has(
+            peerIdFromThread(
+              thread,
+              me,
+            ),
+          ),
+        );
+
+      const threadIds =
+        authorizedThreads.map(
+          (thread) =>
+            String(thread._id),
+        );
+
+      const latestByThread =
+        new Map();
+
+      if (threadIds.length) {
+        const recentMessages =
+          await Message.find({
+            kind: 'dm',
+            thread: {
+              $in: threadIds,
+            },
+          })
+            .sort({ sentAt: -1 })
+            .lean();
+
+        for (const message of recentMessages) {
+          const key = String(message.thread || '');
+
+          if (!latestByThread.has(key)) {
+            latestByThread.set(key, message);
+          }
+        }
+      }
 
       const presented =
-        threads.map(
-          (thread) => ({
-            ...thread,
-
-            lastMessageAt:
+        authorizedThreads
+          .map((thread) => {
+            const threadId = String(thread._id);
+            const latest = latestByThread.get(threadId);
+            const lastMessageAt =
               normalizeMessageTimestamp(
-                thread
-                  .lastMessageAt,
-              ),
-          }),
-        );
+                thread.lastMessageAt,
+              ) ||
+              messageTimestampFrom(latest);
+            const peer = peersById.get(
+              peerIdFromThread(thread, me),
+            );
+
+            return {
+              ...thread,
+              peer,
+              lastMessageAt,
+              latestMessagePreview:
+                previewText(
+                  thread.lastMessagePreview ||
+                  latest?.text,
+                ),
+              latestMessageAuthor:
+                thread.lastMessageAuthor ||
+                latest?.author ||
+                null,
+            };
+          })
+          .sort((left, right) =>
+            new Date(right.lastMessageAt || 0).getTime() -
+            new Date(left.lastMessageAt || 0).getTime(),
+          );
 
       return res.json({
         threads:
@@ -347,25 +379,13 @@ router.get(
     next,
   ) => {
     try {
-      const me =
-        String(
-          req.user._id,
-        );
-
-      const thread =
-        await Thread.findById(
+      const context =
+        await authorizedThread(
+          req,
           req.params.id,
         );
 
-      if (
-        !thread ||
-        !(
-          thread.participants ||
-          []
-        )
-          .map(String)
-          .includes(me)
-      ) {
+      if (!context) {
         return res
           .status(404)
           .json({
@@ -373,6 +393,8 @@ router.get(
               'not found',
           });
       }
+
+      const { thread } = context;
 
       const {
         before,
@@ -484,24 +506,13 @@ router.post(
       const me =
         req.user;
 
-      const thread =
-        await Thread.findById(
+      const context =
+        await authorizedThread(
+          req,
           req.params.id,
         );
 
-      if (
-        !thread ||
-        !(
-          thread.participants ||
-          []
-        )
-          .map(String)
-          .includes(
-            String(
-              me._id,
-            ),
-          )
-      ) {
+      if (!context) {
         return res
           .status(404)
           .json({
@@ -509,6 +520,11 @@ router.post(
               'not found',
           });
       }
+
+      const {
+        thread,
+        peer: recipient,
+      } = context;
 
       const body =
         normalizeMessageBody(
@@ -573,17 +589,17 @@ router.post(
       thread.lastMessageAt =
         canonicalSentAt;
 
+      thread.lastMessagePreview =
+        previewText(body.text);
+
+      thread.lastMessageAuthor =
+        me._id;
+
       await thread.save();
 
       const message =
         presentDirectMessage(
           messageRecord,
-        );
-
-      const recipient =
-        await findPeerForThread(
-          thread,
-          me._id,
         );
 
       req.app

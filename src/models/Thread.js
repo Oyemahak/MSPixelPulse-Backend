@@ -9,6 +9,8 @@ const ThreadSchema = new Schema(
     participants: [{ type: Types.ObjectId, ref: "User" }], // exactly two users
     participantKey: { type: String, trim: true, unique: true, sparse: true, index: true },
     lastMessageAt: { type: Date, default: null, index: true },
+    lastMessagePreview: { type: String, trim: true, default: '' },
+    lastMessageAuthor: { type: Types.ObjectId, ref: 'User', default: null },
   },
   { timestamps: true }
 );
@@ -18,6 +20,6 @@ ThreadSchema.index({ participants: 1 });
 
 const Thread = mongoose.model("Thread", ThreadSchema);
 export default createProviderModel(Thread, {
-  modelName: 'Thread', tab: 'Threads', relations: { participants: 'User' }, unique: [['participantKey']],
-  defaults: { type: 'dm', participants: [], lastMessageAt: null },
+  modelName: 'Thread', tab: 'Threads', relations: { participants: 'User', lastMessageAuthor: 'User' }, unique: [['participantKey']],
+  defaults: { type: 'dm', participants: [], lastMessageAt: null, lastMessagePreview: '', lastMessageAuthor: null },
 });
