@@ -39,6 +39,16 @@ function mediaBody(value) {
   return Readable.from(Buffer.isBuffer(value) ? value : Buffer.from(value || ''));
 }
 
+function resumableUploadHeaders({ accessToken, mimeType, size, origin }) {
+  return {
+    Authorization: `Bearer ${accessToken}`,
+    'Content-Type': 'application/json; charset=UTF-8',
+    'X-Upload-Content-Type': String(mimeType),
+    'X-Upload-Content-Length': String(size),
+    ...(origin ? { Origin: String(origin) } : {}),
+  };
+}
+
 function folderQuery({ name, parentId, appProperties = {} }) {
   return [
     "mimeType = 'application/vnd.google-apps.folder'",
@@ -124,6 +134,7 @@ export class GoogleDriveService {
     mimeType = 'application/octet-stream',
     size,
     appProperties = {},
+    origin = '',
   }) {
     const accessToken = await getGoogleAccessToken();
     const controller = new AbortController();
@@ -134,12 +145,7 @@ export class GoogleDriveService {
         {
           method: 'POST',
           signal: controller.signal,
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json; charset=UTF-8',
-            'X-Upload-Content-Type': String(mimeType),
-            'X-Upload-Content-Length': String(size),
-          },
+          headers: resumableUploadHeaders({ accessToken, mimeType, size, origin }),
           body: JSON.stringify({
             name: path.basename(String(name || 'upload.bin')),
             parents: [parentId],
@@ -229,4 +235,4 @@ export class GoogleDriveService {
 
 export const googleDrive = new GoogleDriveService();
 
-export const driveInternals = { mediaBody };
+export const driveInternals = { mediaBody, resumableUploadHeaders };

@@ -199,6 +199,7 @@ export class GoogleDriveStorage {
       parentId: folder.parentId,
       mimeType: file.mimetype,
       size: file.size,
+      origin: String(metadata.uploadOrigin || ''),
       appProperties: {
         logicalPathHash: logicalPathHash(logicalPath),
         projectId: details.projectId,

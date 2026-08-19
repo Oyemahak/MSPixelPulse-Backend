@@ -246,12 +246,21 @@ export async function upsertRequirement(req, res) {
     map.set(keyOf(p.name), { ...p, name: norm(p.name) });
   }
 
+  const uploadsByPageKey = new Map();
+  const uploadPageNames = new Map();
+  for (const [name, refs] of Object.entries(perPageUploads)) {
+    const key = keyOf(name);
+    uploadsByPageKey.set(key, [...(uploadsByPageKey.get(key) || []), ...refs]);
+    if (!uploadPageNames.has(key)) uploadPageNames.set(key, norm(name));
+  }
+
   // Merge meta + uploads into existing pages
   for (const meta of pagesMeta) {
     const name = norm(meta?.name || "");
     if (!name) continue;
     const k = keyOf(name);
-    const newFiles = perPageUploads[name] || [];
+    const newFiles = uploadsByPageKey.get(k) || [];
+    uploadsByPageKey.delete(k);
 
     if (map.has(k)) {
       const cur = map.get(k);
@@ -270,10 +279,12 @@ export async function upsertRequirement(req, res) {
   }
 
   // Handle uploads that came without a meta entry
-  for (const name of Object.keys(perPageUploads)) {
-    const k = keyOf(name);
-    if (!map.has(k)) {
-      map.set(k, { name: norm(name), note: "", files: perPageUploads[name] });
+  for (const [key, refs] of uploadsByPageKey) {
+    if (map.has(key)) {
+      const currentPage = map.get(key);
+      map.set(key, { ...currentPage, files: [...(currentPage.files || []), ...refs] });
+    } else {
+      map.set(key, { name: uploadPageNames.get(key) || "Page", note: "", files: refs });
     }
   }
 
@@ -302,6 +313,8 @@ export async function upsertRequirement(req, res) {
         body: 'New/updated files or notes were added by the client.',
         ts: Date.now(),
         author: me._id,
+        authorName: cleanText(me.name || '', 120),
+        authorRole: cleanText(me.role || '', 40),
       });
       await project.save();
     }
@@ -325,7 +338,7 @@ export async function setReview(req, res) {
     { $set: { reviewedByDev: !!reviewed, reviewedAt: reviewed ? new Date() : null } },
     { new: true, upsert: true }
   ).lean();
-  res.json({ ok: true, requirement: doc });
+  res.json({ ok: true, requirement: await presentRequirement(doc) });
 }
 
 /**

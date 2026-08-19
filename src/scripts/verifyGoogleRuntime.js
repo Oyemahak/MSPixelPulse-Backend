@@ -20,7 +20,9 @@ const marker = `google-runtime-${Date.now()}`;
 const passwordA = crypto.randomBytes(18).toString('base64url');
 const passwordB = crypto.randomBytes(18).toString('base64url');
 const passwordB2 = crypto.randomBytes(18).toString('base64url');
+const developerPassword = crypto.randomBytes(18).toString('base64url');
 const adminPassword = crypto.randomBytes(18).toString('base64url');
+const browserOrigin = 'https://mspixelpulse.com';
 const resources = { users: [], projects: [], paths: [], tickets: [] };
 const checks = [];
 
@@ -35,10 +37,11 @@ function record(name, response, expected) {
   return response.body;
 }
 
-async function request(path, { method = 'GET', token, json, form, expected = [200] } = {}) {
+async function request(path, { method = 'GET', token, json, form, origin = '', expected = [200] } = {}) {
   const headers = {};
   if (token) headers.authorization = `Bearer ${token}`;
   if (json !== undefined) headers['content-type'] = 'application/json';
+  if (origin) headers.origin = origin;
   const response = await fetch(`${base}${path}`, {
     method,
     headers,
@@ -46,7 +49,7 @@ async function request(path, { method = 'GET', token, json, form, expected = [20
   });
   let body = {};
   try { body = await response.json(); } catch { body = {}; }
-  return { status: response.status, body, expected };
+  return { status: response.status, body, headers: response.headers, expected };
 }
 
 async function login(email, password, expected = [200]) {
@@ -54,19 +57,39 @@ async function login(email, password, expected = [200]) {
 }
 
 async function directUpload(token, file, { purpose, projectId = '', requirementField = '' }) {
-  const session = record(`create ${purpose} upload session`, await request('/files/upload-session', {
+  const sessionResponse = await request('/files/upload-session', {
     method: 'POST',
     token,
+    origin: browserOrigin,
     json: { name: file.name, type: file.type, size: file.size, purpose, projectId, requirementField },
-  }), [200]).upload;
+  });
+  const session = record(`create ${purpose} upload session`, sessionResponse, [200]).upload;
+  const sessionAllowOrigin = sessionResponse.headers.get('access-control-allow-origin');
+  checks.push({
+    name: `browser origin accepted for ${purpose} upload session`,
+    status: sessionResponse.status,
+    passed: [browserOrigin, '*'].includes(sessionAllowOrigin),
+  });
+  if (![browserOrigin, '*'].includes(sessionAllowOrigin)) {
+    throw new Error(`${purpose} upload session did not allow the production browser origin`);
+  }
   const uploadResponse = await fetch(session.url, {
     method: 'PUT',
-    headers: { 'content-type': file.type },
+    headers: { 'content-type': file.type, origin: browserOrigin },
     body: file,
   });
   let driveFile = {};
   try { driveFile = await uploadResponse.json(); } catch { driveFile = {}; }
   checks.push({ name: `direct ${purpose} upload to Drive`, status: uploadResponse.status, passed: uploadResponse.ok });
+  const driveAllowOrigin = uploadResponse.headers.get('access-control-allow-origin');
+  checks.push({
+    name: `Drive exposes ${purpose} upload response to browser`,
+    status: uploadResponse.status,
+    passed: [browserOrigin, '*'].includes(driveAllowOrigin),
+  });
+  if (![browserOrigin, '*'].includes(driveAllowOrigin)) {
+    throw new Error(`Drive did not expose the ${purpose} upload response to the production browser origin`);
+  }
   if (!uploadResponse.ok || !driveFile.id) {
     const reason = String(driveFile?.error?.message || '').slice(0, 240);
     throw new Error(`Direct ${purpose} upload failed with HTTP ${uploadResponse.status}${reason ? `: ${reason}` : ''}`);
@@ -101,11 +124,15 @@ try {
     method: 'POST', token: adminToken, expected: [201],
     json: { name: 'Runtime Client B', email: `${marker}-b@example.com`, password: passwordB, role: 'client', status: 'active' },
   }), [201]).user;
-  resources.users.push(String(clientA._id), String(clientB._id));
+  const developer = record('admin create assigned developer', await request('/admin/users', {
+    method: 'POST', token: adminToken, expected: [201],
+    json: { name: 'Runtime Developer', email: `${marker}-dev@example.com`, password: developerPassword, role: 'developer', status: 'active' },
+  }), [201]).user;
+  resources.users.push(String(clientA._id), String(clientB._id), String(developer._id));
 
   const projectA = record('admin create project A', await request('/projects', {
     method: 'POST', token: adminToken, expected: [201],
-    json: { title: `${marker} project A`, status: 'active', client: clientA._id },
+    json: { title: `${marker} project A`, status: 'active', client: clientA._id, developer: developer._id },
   }), [201]).project;
   const projectB = record('admin create project B', await request('/projects', {
     method: 'POST', token: adminToken, expected: [201],
@@ -114,9 +141,11 @@ try {
   resources.projects.push(String(projectA._id), String(projectB._id));
 
   const clientALogin = record('client login', await login(clientA.email, passwordA), [200]);
-  const clientAToken = clientALogin.token;
+  let clientAToken = clientALogin.token;
   const clientBLogin = record('second client login', await login(clientB.email, passwordB), [200]);
   let clientBToken = clientBLogin.token;
+  const developerLogin = record('assigned developer login', await login(developer.email, developerPassword), [200]);
+  const developerToken = developerLogin.token;
 
   const clientProjects = record('client project list', await request('/projects', { token: clientAToken }), [200]);
   if (!clientProjects.projects?.some((project) => String(project._id) === String(projectA._id))) {
@@ -128,23 +157,171 @@ try {
   }), [403]);
   record('admin opens all projects', await request(`/projects/${projectB._id}`, { token: adminToken }), [200]);
 
-  const requirementUpload = await directUpload(
+  const developerProjects = record('developer project list', await request('/projects', { token: developerToken }), [200]);
+  if (!developerProjects.projects?.some((project) => String(project._id) === String(projectA._id))) {
+    throw new Error('Assigned project was missing from the developer project list');
+  }
+  if (developerProjects.projects?.some((project) => String(project._id) === String(projectB._id))) {
+    throw new Error('Unassigned project leaked into the developer project list');
+  }
+  record('assigned developer opens project', await request(`/projects/${projectA._id}`, { token: developerToken }), [200]);
+  record('unassigned developer project access denied', await request(`/projects/${projectB._id}`, {
+    token: developerToken, expected: [403],
+  }), [403]);
+
+  record('cross-client requirements access denied', await request(`/projects/${projectA._id}/requirements`, {
+    token: clientBToken, expected: [403],
+  }), [403]);
+  record('cross-client requirement upload denied', await request('/files/upload-session', {
+    method: 'POST',
+    token: clientBToken,
+    origin: browserOrigin,
+    expected: [403],
+    json: {
+      name: `${marker}-denied.pdf`,
+      type: 'application/pdf',
+      size: 64,
+      purpose: 'requirement',
+      projectId: String(projectA._id),
+      requirementField: 'supporting',
+    },
+  }), [403]);
+
+  const tinyPng = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZQmcAAAAASUVORK5CYII=',
+    'base64',
+  );
+  const initialLogo = await directUpload(
     clientAToken,
-    new File([`%PDF-1.4\n% ${marker}`], `${marker}.pdf`, { type: 'application/pdf' }),
+    new File([tinyPng], `${marker}-logo.png`, { type: 'image/png' }),
+    { purpose: 'requirement', projectId: String(projectA._id), requirementField: 'logo' },
+  );
+  const brief = await directUpload(
+    clientAToken,
+    new File([`%PDF-1.4\n% brief ${marker}`], `${marker}-brief.pdf`, { type: 'application/pdf' }),
+    { purpose: 'requirement', projectId: String(projectA._id), requirementField: 'brief' },
+  );
+  const supportingA = await directUpload(
+    clientAToken,
+    new File([`%PDF-1.4\n% supporting A ${marker}`], `${marker}-support-a.pdf`, { type: 'application/pdf' }),
     { purpose: 'requirement', projectId: String(projectA._id), requirementField: 'supporting' },
   );
-  resources.paths.push(requirementUpload.file.path);
-  record('client saves requirements', await request(`/projects/${projectA._id}/requirements`, {
+  const supportingB = await directUpload(
+    clientAToken,
+    new File([`%PDF-1.4\n% supporting B ${marker}`], `${marker}-support-b.pdf`, { type: 'application/pdf' }),
+    { purpose: 'requirement', projectId: String(projectA._id), requirementField: 'supporting' },
+  );
+  const pageUpload = await directUpload(
+    clientAToken,
+    new File([tinyPng], `${marker}-home-reference.png`, { type: 'image/png' }),
+    { purpose: 'requirement', projectId: String(projectA._id), requirementField: 'page:Home' },
+  );
+  resources.paths.push(
+    initialLogo.file.path,
+    brief.file.path,
+    supportingA.file.path,
+    supportingB.file.path,
+    pageUpload.file.path,
+  );
+
+  record('client saves logo brief supporting and page files', await request(`/projects/${projectA._id}/requirements`, {
     method: 'PUT', token: clientAToken,
     json: {
       pages: [{ name: 'Home', note: marker }],
-      uploadedFiles: { supporting: [requirementUpload.file], pageFiles: {} },
+      uploadedFiles: {
+        logo: initialLogo.file,
+        brief: brief.file,
+        supporting: [supportingA.file, supportingB.file],
+        pageFiles: { Home: [pageUpload.file] },
+      },
     },
   }), [200]);
+
+  const replacementLogo = await directUpload(
+    clientAToken,
+    new File([tinyPng, marker], `${marker}-logo-replacement.png`, { type: 'image/png' }),
+    { purpose: 'requirement', projectId: String(projectA._id), requirementField: 'logo' },
+  );
+  resources.paths.push(replacementLogo.file.path);
+  record('client replaces only the logo with case-insensitive page metadata', await request(`/projects/${projectA._id}/requirements`, {
+    method: 'PUT', token: clientAToken,
+    json: {
+      pages: [{ name: 'home', note: `${marker} updated` }],
+      uploadedFiles: { logo: replacementLogo.file, supporting: [], pageFiles: {} },
+    },
+  }), [200]);
+
   const requirement = record('requirements persist after read', await request(`/projects/${projectA._id}/requirements`, {
     token: clientAToken,
   }), [200]);
-  if (!requirement.requirement?.pages?.some((page) => page.note === marker)) throw new Error('Requirement note did not persist');
+  const persistedRequirement = requirement.requirement;
+  const homePages = persistedRequirement?.pages?.filter((page) => String(page.name).toLowerCase() === 'home') || [];
+  if (
+    !persistedRequirement?.logo?.path ||
+    persistedRequirement.logo.path !== replacementLogo.file.path ||
+    persistedRequirement.brief?.path !== brief.file.path ||
+    persistedRequirement.supporting?.length !== 2 ||
+    homePages.length !== 1 ||
+    homePages[0].note !== `${marker} updated` ||
+    homePages[0].files?.length !== 1
+  ) {
+    throw new Error('Complete requirement payload did not persist or merge non-destructively');
+  }
+  const oldLogoResponse = await fetch(initialLogo.file.url);
+  checks.push({
+    name: 'replaced requirement logo is removed from Drive',
+    status: oldLogoResponse.status,
+    passed: oldLogoResponse.status === 404,
+  });
+  if (oldLogoResponse.status !== 404) throw new Error(`Old requirement logo remained accessible with HTTP ${oldLogoResponse.status}`);
+
+  record('admin reads client requirements', await request(`/projects/${projectA._id}/requirements`, {
+    token: adminToken,
+  }), [200]);
+  record('assigned developer reads client requirements', await request(`/projects/${projectA._id}/requirements`, {
+    token: developerToken,
+  }), [200]);
+  record('unassigned developer requirements access denied', await request(`/projects/${projectB._id}/requirements`, {
+    token: developerToken, expected: [403],
+  }), [403]);
+  record('assigned developer marks requirements reviewed', await request(`/projects/${projectA._id}/requirements/review`, {
+    method: 'PATCH', token: developerToken, json: { reviewed: true },
+  }), [200]);
+
+  const createdAnnouncement = record('assigned developer posts announcement', await request(`/projects/${projectA._id}/announcements`, {
+    method: 'POST', token: developerToken, expected: [201], json: { title: marker, body: 'Developer runtime announcement' },
+  }), [201]).announcement;
+  if (createdAnnouncement.authorName !== developer.name || createdAnnouncement.authorRole !== 'developer' || !createdAnnouncement.ts) {
+    throw new Error('Announcement author or timestamp metadata was missing');
+  }
+  const evidenceResult = record('assigned developer posts evidence', await request(`/projects/${projectA._id}/evidence`, {
+    method: 'POST', token: developerToken, expected: [201], json: { title: marker, links: ['https://example.com'], images: [] },
+  }), [201]);
+  const createdEvidence = evidenceResult.project?.evidence?.find((entry) => entry.title === marker);
+  if (createdEvidence?.authorName !== developer.name || createdEvidence?.authorRole !== 'developer' || !createdEvidence?.ts) {
+    throw new Error('Evidence author or timestamp metadata was missing');
+  }
+  record('client cannot post announcements', await request(`/projects/${projectA._id}/announcements`, {
+    method: 'POST', token: clientAToken, expected: [403], json: { title: marker },
+  }), [403]);
+  record('client cannot post evidence', await request(`/projects/${projectA._id}/evidence`, {
+    method: 'POST', token: clientAToken, expected: [403], json: { title: marker, images: [] },
+  }), [403]);
+  record('developer cannot delete announcements', await request(`/projects/${projectA._id}/announcements/0`, {
+    method: 'DELETE', token: developerToken, expected: [403],
+  }), [403]);
+  const clientAnnouncements = record('client reads developer announcement', await request(`/projects/${projectA._id}/announcements`, {
+    token: clientAToken,
+  }), [200]);
+  if (!clientAnnouncements.items?.some((entry) => entry.title === marker && entry.authorRole === 'developer' && entry.ts)) {
+    throw new Error('Developer announcement was not visible to the assigned client');
+  }
+  const clientProjectAfterEvidence = record('client reads developer evidence', await request(`/projects/${projectA._id}`, {
+    token: clientAToken,
+  }), [200]);
+  if (!clientProjectAfterEvidence.project?.evidence?.some((entry) => entry.title === marker && entry.authorRole === 'developer' && entry.ts)) {
+    throw new Error('Developer evidence was not visible to the assigned client');
+  }
 
   const uploaded = (await directUpload(
     clientAToken,
@@ -165,11 +342,22 @@ try {
 
   record('admin creates invoice', await request(`/projects/${projectA._id}/invoices`, {
     method: 'POST', token: adminToken, expected: [201],
-    json: { kind: 'advance', invoiceNumber: marker, title: 'Runtime invoice', lineItems: [{ description: 'QA', quantity: 1, unitPrice: 25, amount: 25 }] },
+    json: {
+      kind: 'advance',
+      invoiceNumber: marker,
+      title: 'Runtime invoice',
+      status: 'sent',
+      lineItems: [{ description: 'QA', quantity: 1, unitPrice: 25, amount: 25 }],
+    },
   }), [201]);
-  const invoices = record('client reads billing', await request(`/projects/${projectA._id}/invoices`, {
-    token: clientAToken,
-  }), [200]);
+  let invoices;
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    invoices = record(`client reads billing (attempt ${attempt})`, await request(`/projects/${projectA._id}/invoices`, {
+      token: clientAToken,
+    }), [200]);
+    if (invoices.invoices?.some((invoice) => invoice.invoiceNumber === marker)) break;
+    await new Promise((resolve) => setTimeout(resolve, 750 * attempt));
+  }
   if (!invoices.invoices?.some((invoice) => invoice.invoiceNumber === marker)) throw new Error('Invoice did not persist');
 
   const ticket = record('client creates support request', await request('/support', {
@@ -191,6 +379,14 @@ try {
   }), [200]);
   const profileAfter = record('profile and settings persist', await request('/users/me', { token: clientAToken }), [200]).user;
   if (profileAfter.phone !== marker || profileAfter.themePreference !== 'light') throw new Error('Profile settings did not persist');
+  record('client logout before theme persistence check', await request('/auth/logout', {
+    method: 'POST', token: clientAToken,
+  }), [200]);
+  clientAToken = record('client login after theme update', await login(clientA.email, passwordA), [200]).token;
+  const profileAfterLogin = record('theme preference persists after fresh login', await request('/users/me', {
+    token: clientAToken,
+  }), [200]).user;
+  if (profileAfterLogin.themePreference !== 'light') throw new Error('Theme preference did not persist after a fresh login');
 
   const avatarForm = new FormData();
   avatarForm.append('avatar', new File([
@@ -267,7 +463,20 @@ try {
 } finally {
   const cleanupErrors = [];
   const cleanup = async (name, operation) => {
-    try { await operation(); } catch (error) { cleanupErrors.push(`${name}: ${error.message}`); }
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      try {
+        await operation();
+        return;
+      } catch (error) {
+        const quotaExceeded = /quota exceeded|rate limit/i.test(String(error?.message || ''));
+        if (quotaExceeded && attempt < 5) {
+          await new Promise((resolve) => setTimeout(resolve, 15_000));
+          continue;
+        }
+        cleanupErrors.push(`${name}: ${error.message}`);
+        return;
+      }
+    }
   };
   await cleanup('Drive files', () => removePaths(resources.paths));
   await cleanup('messages', () => Message.deleteMany({ project: { $in: resources.projects } }));

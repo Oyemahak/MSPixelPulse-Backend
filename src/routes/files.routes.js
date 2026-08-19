@@ -20,6 +20,7 @@ import {
 } from '../lib/filePolicy.js';
 
 import {
+  canManageRequirements,
   canReadProject,
   canWriteProject,
   projectAccessError,
@@ -264,7 +265,7 @@ async function authorizeDirectUpload(
     'requirement'
   ) {
     allowed =
-      canReadProject(
+      canManageRequirements(
         req.user,
         project,
       );
@@ -464,6 +465,15 @@ router.post(
         isPublic:
           authorization.purpose ===
           'cover',
+
+        // Google binds resumable-session CORS response headers to the
+        // initiating Origin. The global CORS middleware has already
+        // validated this value before this route runs.
+        uploadOrigin:
+          String(
+            req.get('origin') ||
+              '',
+          ),
       };
 
       const session =

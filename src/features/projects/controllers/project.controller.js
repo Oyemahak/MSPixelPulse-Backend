@@ -436,6 +436,8 @@ export async function addEvidence(req, res) {
     images: cleanImages,
     ts: Date.now(),
     author: me._id,
+    authorName: cleanText(me.name || '', 120),
+    authorRole: cleanText(me.role || '', 40),
   });
 
   await project.save();
@@ -472,7 +474,14 @@ export async function createAnnouncement(req, res) {
   if (!project) return res.status(404).json({ message: 'Project not found' });
   if (!canWriteProject(me, project)) return projectAccessError(res);
 
-  const entry = { title: title.trim(), body: String(body || ''), ts: Date.now(), author: me._id };
+  const entry = {
+    title: cleanText(title, 160),
+    body: cleanText(body, 4000),
+    ts: Date.now(),
+    author: me._id,
+    authorName: cleanText(me.name || '', 120),
+    authorRole: cleanText(me.role || '', 40),
+  };
   project.announcements.unshift(entry);
   await project.save();
 

@@ -24,6 +24,8 @@ const EvidenceEntrySchema = new mongoose.Schema(
     images: [EvidenceImageSchema],
     ts:     { type: Number, default: () => Date.now() },
     author: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, // who added it
+    authorName: { type: String, trim: true, default: '' },
+    authorRole: { type: String, trim: true, default: '' },
   },
   { _id: false }
 );
@@ -37,6 +39,8 @@ const AnnouncementEntrySchema = new mongoose.Schema(
     body:   { type: String, default: '', trim: true },
     ts:     { type: Number, default: () => Date.now() },
     author: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, // who posted
+    authorName: { type: String, trim: true, default: '' },
+    authorRole: { type: String, trim: true, default: '' },
   },
   { _id: false }
 );
