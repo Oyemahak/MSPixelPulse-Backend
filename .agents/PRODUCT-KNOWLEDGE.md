@@ -83,6 +83,8 @@ Small uploads may pass through the API within platform limits. Larger files shou
 
 Admin billing supports generated branded PDFs and uploaded external invoices as separate source types. Invoice records persist sender/client identity, line items, discounts, optional tax, totals, payments, balances, notes, paper size, status, and private internal notes. Invoice defaults are stored as unpublished private site content and must never be returned from public content routes.
 
+Invoice records also persist `paymentStage`, `paymentPercent`, `projectValue`, and `paymentTermsPreset`, while legacy `kind` remains compatible. Supported stages are full (100%), advance (50%), remaining (50%), custom percentage/amount, and other amount. Due-on-receipt, Net 7, Net 14, Net 30, and custom-date presets store an exact due date. Generated PDFs receive only Admin-configured payment methods/instructions, scope/refund terms, closing copy, footer text, and page-number preference; private banking data must never be hardcoded.
+
 Tax is off by default. Never copy sample GST/HST registration details, small-supplier statements, legal claims, or tax status into production configuration without explicit business-owner input. Client reads exclude drafts, archives, and `internalNotes`; all file access remains scoped to authorized projects and backend-signed Drive access.
 
 ## Presence Contract

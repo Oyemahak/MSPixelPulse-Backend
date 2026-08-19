@@ -46,6 +46,9 @@ const PAYMENT_METHODS = new Set([
   "Remitly",
   "Other",
 ]);
+const PAYMENT_STAGES = new Set(["full", "advance", "remaining", "custom", "other"]);
+const PAYMENT_TERMS_PRESETS = new Set(["due_on_receipt", "net_7", "net_14", "net_30", "custom"]);
+const PAYMENT_METHOD_KEYS = new Set(["interac", "bank", "remitly", "cheque", "other"]);
 
 const DEFAULT_INVOICE_SETTINGS = {
   sender: {
@@ -64,8 +67,23 @@ const DEFAULT_INVOICE_SETTINGS = {
   taxRate: 0,
   taxRegistrationNumber: "",
   taxNote: "",
+  defaultPaymentTermsPreset: "net_14",
   paymentTerms: "Payment is due by the date shown on this invoice.",
   defaultNotes: "Thank you for choosing MSPixelPulse.",
+  paymentNotice: "Please include the invoice number with your payment.",
+  paymentReference: "",
+  paymentMethods: [
+    { key: "interac", label: "Interac e-Transfer", enabled: false, instructions: "" },
+    { key: "bank", label: "Bank transfer", enabled: false, instructions: "" },
+    { key: "remitly", label: "Remitly", enabled: false, instructions: "" },
+    { key: "cheque", label: "Cheque", enabled: false, instructions: "" },
+    { key: "other", label: "Other", enabled: false, instructions: "" },
+  ],
+  scopeTerms: "Work, deliverables, licensing, hosting, maintenance, third-party services, and revisions are governed by the agreed project scope or service agreement. Additional work outside the approved scope may be billed separately.",
+  refundTerms: "Payments already applied to completed work or committed third-party costs may be non-refundable where applicable, subject to the signed agreement and applicable law.",
+  closingMessage: "Thank you for choosing MSPixelPulse.",
+  footerText: "mspixelpulse.com · info@mspixelpulse.com",
+  showPageNumbers: true,
 };
 
 function storage() {
@@ -81,6 +99,31 @@ function canWrite(user, project) {
 
 function normalizeKind(value) {
   return ['advance', 'final', 'other'].includes(value) ? value : '';
+}
+
+function normalizePaymentStage(value, legacyKind = "") {
+  const stage = String(value || "").trim().toLowerCase();
+  if (PAYMENT_STAGES.has(stage)) return stage;
+  if (legacyKind === "advance") return "advance";
+  if (legacyKind === "final") return "remaining";
+  return "other";
+}
+
+function legacyKindForStage(stage) {
+  if (stage === "advance") return "advance";
+  if (stage === "remaining") return "final";
+  return "other";
+}
+
+function defaultPercentForStage(stage) {
+  if (stage === "full") return 100;
+  if (stage === "advance" || stage === "remaining") return 50;
+  return 0;
+}
+
+function normalizePaymentTermsPreset(value) {
+  const preset = String(value || "").trim().toLowerCase();
+  return PAYMENT_TERMS_PRESETS.has(preset) ? preset : "custom";
 }
 
 function money(value) {
@@ -123,6 +166,25 @@ function normalizePayments(items = []) {
   })).filter((item) => item.amount > 0);
 }
 
+function normalizePaymentMethods(items, fallback = []) {
+  const source = Array.isArray(items) ? items : fallback;
+  if (!Array.isArray(source)) return [];
+
+  const seen = new Set();
+  return source.slice(0, PAYMENT_METHOD_KEYS.size).map((item) => {
+    const requestedKey = cleanText(item?.key, 40).toLowerCase();
+    const key = PAYMENT_METHOD_KEYS.has(requestedKey) ? requestedKey : "other";
+    if (seen.has(key)) return null;
+    seen.add(key);
+    return {
+      key,
+      label: cleanText(item?.label, 100) || (key === "bank" ? "Bank transfer" : key === "interac" ? "Interac e-Transfer" : key[0].toUpperCase() + key.slice(1)),
+      enabled: Boolean(item?.enabled),
+      instructions: cleanText(item?.instructions, 1200),
+    };
+  }).filter(Boolean);
+}
+
 function normalizePageSize(value) {
   return String(value || "").toUpperCase() === "A4" ? "A4" : "LETTER";
 }
@@ -130,6 +192,11 @@ function normalizePageSize(value) {
 function invoiceDetails(body = {}) {
   const allowed = [
     'invoiceNumber',
+    'kind',
+    'paymentStage',
+    'paymentPercent',
+    'projectValue',
+    'paymentTermsPreset',
     'sourceType',
     'title',
     'currency',
@@ -149,6 +216,14 @@ function invoiceDetails(body = {}) {
     'balanceDue',
     'payments',
     'paymentTerms',
+    'paymentNotice',
+    'paymentReference',
+    'paymentMethods',
+    'scopeTerms',
+    'refundTerms',
+    'closingMessage',
+    'footerText',
+    'showPageNumbers',
     'notes',
     'internalNotes',
     'pageSize',
@@ -175,6 +250,9 @@ function invoiceDetails(body = {}) {
   if ('total' in details) details.total = money(details.total);
   if ('amountPaid' in details) details.amountPaid = money(details.amountPaid);
   if ('balanceDue' in details) details.balanceDue = money(details.balanceDue);
+  if ('projectValue' in details) details.projectValue = money(details.projectValue);
+  if ('paymentPercent' in details) details.paymentPercent = percent(details.paymentPercent);
+  if ('paymentMethods' in details) details.paymentMethods = normalizePaymentMethods(details.paymentMethods);
   if ('pageSize' in details) details.pageSize = normalizePageSize(details.pageSize);
 
   return details;
@@ -323,10 +401,25 @@ function automaticStatus({ requested, fallback = 'draft', total, amountPaid, due
 function buildInvoicePayload(body = {}, project, user, existing = {}) {
   const details = invoiceDetails(body);
   const totals = calculateInvoiceTotals(details, existing);
+  const paymentStage = normalizePaymentStage(
+    details.paymentStage ?? existing.paymentStage,
+    normalizeKind(details.kind ?? body.kind ?? existing.kind),
+  );
+  const suppliedPercent = details.paymentPercent ?? existing.paymentPercent;
 
   const payload = {
     client: project.client || existing.client || null,
-    kind: body.kind || existing.kind || "other",
+    kind: normalizeKind(details.kind ?? body.kind) || (
+      Object.prototype.hasOwnProperty.call(details, 'paymentStage')
+        ? legacyKindForStage(paymentStage)
+        : normalizeKind(existing.kind) || legacyKindForStage(paymentStage)
+    ),
+    paymentStage,
+    paymentPercent: suppliedPercent === undefined || suppliedPercent === null
+      ? defaultPercentForStage(paymentStage)
+      : percent(suppliedPercent),
+    projectValue: money(details.projectValue ?? existing.projectValue ?? totals.subtotal),
+    paymentTermsPreset: normalizePaymentTermsPreset(details.paymentTermsPreset ?? existing.paymentTermsPreset),
     sourceType: ['generated', 'uploaded'].includes(details.sourceType)
       ? details.sourceType
       : existing.sourceType || 'uploaded',
@@ -340,6 +433,14 @@ function buildInvoicePayload(body = {}, project, user, existing = {}) {
     taxRegistrationNumber: cleanText(details.taxRegistrationNumber ?? existing.taxRegistrationNumber ?? "", 120),
     taxNote: cleanText(details.taxNote ?? existing.taxNote ?? "", 600),
     paymentTerms: cleanText(details.paymentTerms ?? existing.paymentTerms ?? "", 1000),
+    paymentNotice: cleanText(details.paymentNotice ?? existing.paymentNotice ?? "", 1000),
+    paymentReference: cleanText(details.paymentReference ?? existing.paymentReference ?? "", 500),
+    paymentMethods: normalizePaymentMethods(details.paymentMethods, existing.paymentMethods || []),
+    scopeTerms: cleanText(details.scopeTerms ?? existing.scopeTerms ?? "", 1500),
+    refundTerms: cleanText(details.refundTerms ?? existing.refundTerms ?? "", 1500),
+    closingMessage: cleanText(details.closingMessage ?? existing.closingMessage ?? "", 1000),
+    footerText: cleanText(details.footerText ?? existing.footerText ?? "", 500),
+    showPageNumbers: Boolean(details.showPageNumbers ?? existing.showPageNumbers ?? true),
     notes: cleanText(details.notes ?? existing.notes ?? "", 2000),
     internalNotes: cleanText(details.internalNotes ?? existing.internalNotes ?? "", 2000),
     pageSize: normalizePageSize(details.pageSize ?? existing.pageSize),
@@ -368,8 +469,19 @@ function normalizeInvoiceSettings(value = {}) {
     taxRate: percent(source.taxRate),
     taxRegistrationNumber: cleanText(source.taxRegistrationNumber, 120),
     taxNote: cleanText(source.taxNote, 600),
+    defaultPaymentTermsPreset: normalizePaymentTermsPreset(
+      source.defaultPaymentTermsPreset || DEFAULT_INVOICE_SETTINGS.defaultPaymentTermsPreset,
+    ),
     paymentTerms: cleanText(source.paymentTerms || DEFAULT_INVOICE_SETTINGS.paymentTerms, 1000),
     defaultNotes: cleanText(source.defaultNotes || DEFAULT_INVOICE_SETTINGS.defaultNotes, 2000),
+    paymentNotice: cleanText(source.paymentNotice || DEFAULT_INVOICE_SETTINGS.paymentNotice, 1000),
+    paymentReference: cleanText(source.paymentReference, 500),
+    paymentMethods: normalizePaymentMethods(source.paymentMethods, DEFAULT_INVOICE_SETTINGS.paymentMethods),
+    scopeTerms: cleanText(source.scopeTerms || DEFAULT_INVOICE_SETTINGS.scopeTerms, 1500),
+    refundTerms: cleanText(source.refundTerms || DEFAULT_INVOICE_SETTINGS.refundTerms, 1500),
+    closingMessage: cleanText(source.closingMessage || DEFAULT_INVOICE_SETTINGS.closingMessage, 1000),
+    footerText: cleanText(source.footerText || DEFAULT_INVOICE_SETTINGS.footerText, 500),
+    showPageNumbers: source.showPageNumbers !== false,
   };
 }
 
@@ -409,6 +521,14 @@ async function invoiceNumberFor(requested, excludeId = '') {
 
 function clientSafeInvoice(invoice, role) {
   const value = invoice?.toObject?.() || { ...invoice };
+  value.paymentStage = normalizePaymentStage(value.paymentStage, normalizeKind(value.kind));
+  if (value.paymentPercent === undefined || value.paymentPercent === null) {
+    value.paymentPercent = defaultPercentForStage(value.paymentStage);
+  }
+  if (value.projectValue === undefined || value.projectValue === null) {
+    value.projectValue = money(value.subtotal || value.total);
+  }
+  value.paymentTermsPreset = normalizePaymentTermsPreset(value.paymentTermsPreset);
   if (role !== 'admin') delete value.internalNotes;
   return value;
 }
@@ -900,6 +1020,10 @@ export const invoiceUploadInternals = {
   automaticStatus,
   calculateInvoiceTotals,
   invoiceDetails,
+  legacyKindForStage,
+  normalizePaymentMethods,
+  normalizePaymentStage,
+  normalizePaymentTermsPreset,
   normalizeInvoiceSettings,
   uploadRange,
 };

@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  getInvoiceSettings,
   invoiceUploadInternals,
+  updateInvoiceSettings,
 } from './invoice.controller.js';
 
 test('invoice relay validates bounded content ranges', () => {
@@ -28,6 +30,50 @@ test('invoice relay keeps only supported metadata fields', () => {
       secret: 'discard-me',
     }),
     { title: 'Invoice title', total: 1200 },
+  );
+});
+
+test('invoice metadata accepts payment workflow fields and discards unknown fields', () => {
+  assert.deepEqual(
+    invoiceUploadInternals.invoiceDetails({
+      paymentStage: 'custom',
+      paymentPercent: 25,
+      projectValue: 2000,
+      paymentTermsPreset: 'net_7',
+      paymentMethods: [{ key: 'interac', label: 'Interac e-Transfer', enabled: true }],
+      privateBankingSecret: 'discard-me',
+    }),
+    {
+      paymentStage: 'custom',
+      paymentPercent: 25,
+      projectValue: 2000,
+      paymentTermsPreset: 'net_7',
+      paymentMethods: [{ key: 'interac', label: 'Interac e-Transfer', enabled: true, instructions: '' }],
+    },
+  );
+});
+
+test('legacy invoice kinds map safely to the expanded payment stages', () => {
+  assert.equal(invoiceUploadInternals.normalizePaymentStage('', 'advance'), 'advance');
+  assert.equal(invoiceUploadInternals.normalizePaymentStage('', 'final'), 'remaining');
+  assert.equal(invoiceUploadInternals.normalizePaymentStage('', 'other'), 'other');
+  assert.equal(invoiceUploadInternals.legacyKindForStage('remaining'), 'final');
+  assert.equal(invoiceUploadInternals.legacyKindForStage('full'), 'other');
+});
+
+test('invoice terms presets and payment methods are strictly normalized', () => {
+  assert.equal(invoiceUploadInternals.normalizePaymentTermsPreset('net_30'), 'net_30');
+  assert.equal(invoiceUploadInternals.normalizePaymentTermsPreset('unsafe'), 'custom');
+  assert.deepEqual(
+    invoiceUploadInternals.normalizePaymentMethods([
+      { key: 'bank', label: 'Bank transfer', enabled: true, instructions: 'Configured privately by Admin' },
+      { key: 'bank', label: 'Duplicate', enabled: true },
+      { key: 'unsupported', label: 'Alternate', enabled: false },
+    ]),
+    [
+      { key: 'bank', label: 'Bank transfer', enabled: true, instructions: 'Configured privately by Admin' },
+      { key: 'other', label: 'Alternate', enabled: false, instructions: '' },
+    ],
   );
 });
 
@@ -96,4 +142,30 @@ test('invoice settings keep tax optional and do not copy sample tax claims', () 
   assert.equal(settings.chargeTax, false);
   assert.equal(settings.taxRate, 13);
   assert.equal(settings.taxNote, '');
+  assert.equal(settings.defaultPaymentTermsPreset, 'net_14');
+  assert.equal(settings.paymentMethods.every((method) => method.enabled === false), true);
+  assert.match(settings.scopeTerms, /agreed project scope/i);
+});
+
+test('invoice settings endpoints reject non-admin roles before reading or writing storage', async () => {
+  for (const handler of [getInvoiceSettings, updateInvoiceSettings]) {
+    let statusCode = 200;
+    let payload;
+    const response = {
+      status(code) {
+        statusCode = code;
+        return this;
+      },
+      json(value) {
+        payload = value;
+        return this;
+      },
+    };
+
+    await handler({ user: { role: 'client' }, body: {} }, response, (error) => {
+      throw error;
+    });
+    assert.equal(statusCode, 403);
+    assert.deepEqual(payload, { error: 'Admin only' });
+  }
 });

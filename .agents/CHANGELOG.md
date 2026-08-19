@@ -1,5 +1,9 @@
 # Agent System Changelog
 
+## 2026-08-19
+- Persisted payment stage, percentage, project value, due preset, configured payment methods, professional terms, closing copy, footer text, and page numbering without breaking legacy invoice `kind` values.
+- Expanded production runtime verification to generate and relay-upload a PDF invoice, reload the exact custom 25% calculation, and confirm assigned-client visibility before complete cleanup.
+
 ## 2026-08-18
 - Added the generated/uploaded invoice contract, configurable private defaults, optional-tax safety, payment/balance calculation, expanded statuses, and client-safe serialization requirements.
 - Added persisted presence guidance for login, authenticated heartbeat, explicit logout, and normalized last-activity display.

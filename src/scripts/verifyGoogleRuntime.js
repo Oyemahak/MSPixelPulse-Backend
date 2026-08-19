@@ -101,6 +101,51 @@ async function directUpload(token, file, { purpose, projectId = '', requirementF
   }), [200]);
 }
 
+async function uploadInvoicePdf(token, projectId, file, invoice) {
+  const sessionResponse = await request(`/projects/${projectId}/invoices/upload-session`, {
+    method: 'POST',
+    token,
+    origin: browserOrigin,
+    json: {
+      name: file.name,
+      type: file.type,
+      size: file.size,
+      kind: 'other',
+      invoice,
+    },
+  });
+  const session = record('admin creates generated invoice upload session', sessionResponse, [200]).upload;
+  const sessionAllowOrigin = sessionResponse.headers.get('access-control-allow-origin');
+  checks.push({
+    name: 'browser origin accepted for generated invoice upload session',
+    status: sessionResponse.status,
+    passed: [browserOrigin, '*'].includes(sessionAllowOrigin),
+  });
+  if (![browserOrigin, '*'].includes(sessionAllowOrigin)) {
+    throw new Error('Generated invoice upload session did not allow the production browser origin');
+  }
+
+  const bytes = Buffer.from(await file.arrayBuffer());
+  const uploadResponse = await fetch(`${base}/projects/${projectId}/invoices/upload-chunk`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${token}`,
+      origin: browserOrigin,
+      'content-type': 'application/octet-stream',
+      'content-range': `bytes 0-${bytes.length - 1}/${bytes.length}`,
+      'x-upload-token': session.token,
+    },
+    body: bytes,
+  });
+  let body = {};
+  try { body = await uploadResponse.json(); } catch { body = {}; }
+  return record('admin uploads generated invoice PDF', {
+    status: uploadResponse.status,
+    body,
+    headers: uploadResponse.headers,
+  }, [201]);
+}
+
 let runError;
 try {
   const tempAdmin = await usersRepository.create({
@@ -340,16 +385,62 @@ try {
   checks.push({ name: 'signed Drive attachment download', status: download.status, passed: download.status === 200 });
   if (download.status !== 200 || !(await download.text()).includes(marker)) throw new Error('Drive attachment download failed');
 
-  record('admin creates invoice', await request(`/projects/${projectA._id}/invoices`, {
-    method: 'POST', token: adminToken, expected: [201],
-    json: {
-      kind: 'advance',
+  const issueDate = new Date().toISOString().slice(0, 10);
+  const dueDateValue = new Date(`${issueDate}T12:00:00.000Z`);
+  dueDateValue.setUTCDate(dueDateValue.getUTCDate() + 14);
+  const dueDate = dueDateValue.toISOString().slice(0, 10);
+  const uploadedInvoice = await uploadInvoicePdf(
+    adminToken,
+    String(projectA._id),
+    new File(
+      [`%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n${marker}`],
+      `${marker}-invoice.pdf`,
+      { type: 'application/pdf' },
+    ),
+    {
       invoiceNumber: marker,
       title: 'Runtime invoice',
       status: 'sent',
-      lineItems: [{ description: 'QA', quantity: 1, unitPrice: 25, amount: 25 }],
+      sourceType: 'generated',
+      paymentStage: 'custom',
+      paymentPercent: 25,
+      projectValue: 2000,
+      paymentTermsPreset: 'net_14',
+      issueDate,
+      dueDate,
+      currency: 'CAD',
+      lineItems: [{ description: 'Custom 25% project payment', quantity: 1, unitPrice: 500, amount: 500 }],
+      amountPaid: 0,
+      paymentNotice: 'Please include the invoice number with your payment.',
+      paymentReference: marker,
+      paymentMethods: [{
+        key: 'interac',
+        label: 'Interac e-Transfer',
+        enabled: true,
+        instructions: 'Contact MSPixelPulse for secure payment instructions.',
+      }],
+      scopeTerms: 'This invoice covers the agreed project scope.',
+      refundTerms: 'Payments are subject to the signed agreement and applicable law.',
+      closingMessage: 'Thank you for your business.',
+      footerText: 'MSPixelPulse · Toronto, Ontario, Canada',
+      showPageNumbers: true,
     },
-  }), [201]);
+  );
+  resources.paths.push(uploadedInvoice.invoice.file.path);
+  if (
+    uploadedInvoice.invoice.status !== 'sent' ||
+    uploadedInvoice.invoice.paymentStage !== 'custom' ||
+    uploadedInvoice.invoice.paymentPercent !== 25 ||
+    uploadedInvoice.invoice.projectValue !== 2000 ||
+    uploadedInvoice.invoice.total !== 500 ||
+    uploadedInvoice.invoice.balanceDue !== 500 ||
+    uploadedInvoice.invoice.amountPaid !== 0 ||
+    uploadedInvoice.invoice.paymentTermsPreset !== 'net_14' ||
+    String(uploadedInvoice.invoice.dueDate || '').slice(0, 10) !== dueDate ||
+    !uploadedInvoice.invoice.file?.path
+  ) {
+    throw new Error('Generated invoice metadata, balance, due terms, or Drive file did not persist');
+  }
   let invoices;
   for (let attempt = 1; attempt <= 4; attempt += 1) {
     invoices = record(`client reads billing (attempt ${attempt})`, await request(`/projects/${projectA._id}/invoices`, {
@@ -358,7 +449,20 @@ try {
     if (invoices.invoices?.some((invoice) => invoice.invoiceNumber === marker)) break;
     await new Promise((resolve) => setTimeout(resolve, 750 * attempt));
   }
-  if (!invoices.invoices?.some((invoice) => invoice.invoiceNumber === marker)) throw new Error('Invoice did not persist');
+  const clientInvoice = invoices.invoices?.find((invoice) => invoice.invoiceNumber === marker);
+  if (!clientInvoice) throw new Error('Invoice did not persist');
+  if (
+    clientInvoice.paymentStage !== 'custom' ||
+    clientInvoice.paymentPercent !== 25 ||
+    clientInvoice.projectValue !== 2000 ||
+    clientInvoice.total !== 500 ||
+    clientInvoice.balanceDue !== 500 ||
+    clientInvoice.status !== 'sent' ||
+    clientInvoice.paymentMethods?.[0]?.label !== 'Interac e-Transfer' ||
+    !clientInvoice.file?.url
+  ) {
+    throw new Error('Generated invoice was not fully visible to the assigned client');
+  }
 
   const ticket = record('client creates support request', await request('/support', {
     method: 'POST', token: clientAToken, expected: [201], json: { subject: marker, message: 'Runtime support request' },

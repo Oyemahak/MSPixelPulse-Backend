@@ -41,11 +41,34 @@ const PaymentSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const PaymentMethodSchema = new mongoose.Schema(
+  {
+    key: { type: String, trim: true, default: "other" },
+    label: { type: String, trim: true, default: "Other" },
+    enabled: { type: Boolean, default: true },
+    instructions: { type: String, trim: true, default: "" },
+  },
+  { _id: false }
+);
+
 const InvoiceSchema = new mongoose.Schema(
   {
     project: { type: mongoose.Schema.Types.ObjectId, ref: "Project", index: true, required: true },
     client: { type: mongoose.Schema.Types.ObjectId, ref: "User", index: true, default: null },
     kind: { type: String, enum: ["advance", "final", "other"], default: "other" },
+    paymentStage: {
+      type: String,
+      enum: ["full", "advance", "remaining", "custom", "other"],
+      default: "other",
+      index: true,
+    },
+    paymentPercent: { type: Number, default: 0, min: 0, max: 100 },
+    projectValue: { type: Number, default: 0, min: 0 },
+    paymentTermsPreset: {
+      type: String,
+      enum: ["due_on_receipt", "net_7", "net_14", "net_30", "custom"],
+      default: "custom",
+    },
     sourceType: { type: String, enum: ["generated", "uploaded"], default: "uploaded" },
     status: {
       type: String,
@@ -74,6 +97,14 @@ const InvoiceSchema = new mongoose.Schema(
     balanceDue: { type: Number, default: 0, min: 0 },
     payments: { type: [PaymentSchema], default: [] },
     paymentTerms: { type: String, trim: true, default: "" },
+    paymentNotice: { type: String, trim: true, default: "" },
+    paymentReference: { type: String, trim: true, default: "" },
+    paymentMethods: { type: [PaymentMethodSchema], default: [] },
+    scopeTerms: { type: String, trim: true, default: "" },
+    refundTerms: { type: String, trim: true, default: "" },
+    closingMessage: { type: String, trim: true, default: "" },
+    footerText: { type: String, trim: true, default: "" },
+    showPageNumbers: { type: Boolean, default: true },
     notes: { type: String, trim: true, default: "" },
     internalNotes: { type: String, trim: true, default: "" },
     pageSize: { type: String, enum: ["LETTER", "A4"], default: "LETTER" },
@@ -92,8 +123,10 @@ const Invoice = mongoose.model("Invoice", InvoiceSchema);
 export default createProviderModel(Invoice, {
   modelName: 'Invoice', tab: 'Invoices', relations: { project: 'Project', client: 'User', uploadedBy: 'User' },
   defaults: {
-    kind: 'other', sourceType: 'uploaded', status: 'draft', currency: 'CAD', lineItems: [], sender: {}, clientDetails: {},
+    kind: 'other', paymentStage: 'other', paymentPercent: 0, projectValue: 0,
+    paymentTermsPreset: 'custom', sourceType: 'uploaded', status: 'draft', currency: 'CAD', lineItems: [], sender: {}, clientDetails: {},
     subtotal: 0, discountAmount: 0, chargeTax: false, taxRate: 0, taxAmount: 0,
-    total: 0, amountPaid: 0, balanceDue: 0, payments: [], pageSize: 'LETTER', isDemo: false,
+    total: 0, amountPaid: 0, balanceDue: 0, payments: [], paymentMethods: [],
+    showPageNumbers: true, pageSize: 'LETTER', isDemo: false,
   },
 });
