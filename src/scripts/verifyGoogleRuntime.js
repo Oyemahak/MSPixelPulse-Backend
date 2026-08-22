@@ -44,14 +44,23 @@ async function request(path, { method = 'GET', token, json, form, origin = '', e
   if (token) headers.authorization = `Bearer ${token}`;
   if (json !== undefined) headers['content-type'] = 'application/json';
   if (origin) headers.origin = origin;
-  const response = await fetch(`${base}${path}`, {
-    method,
-    headers,
-    body: form || (json !== undefined ? JSON.stringify(json) : undefined),
-  });
-  let body = {};
-  try { body = await response.json(); } catch { body = {}; }
-  return { status: response.status, body, headers: response.headers, expected };
+  for (let attempt = 1; attempt <= 6; attempt += 1) {
+    const response = await fetch(`${base}${path}`, {
+      method,
+      headers,
+      body: form || (json !== undefined ? JSON.stringify(json) : undefined),
+    });
+    let body = {};
+    try { body = await response.json(); } catch { body = {}; }
+    const quotaExceeded = response.status === 429 && /quota exceeded|rate limit/i.test(String(body?.message || body?.error || ''));
+    if (quotaExceeded && attempt < 6) {
+      const retryAfter = Number(response.headers.get('retry-after'));
+      await new Promise((resolve) => setTimeout(resolve, Number.isFinite(retryAfter) ? retryAfter * 1000 : 15_000));
+      continue;
+    }
+    return { status: response.status, body, headers: response.headers, expected };
+  }
+  throw new Error(`Request retry budget exhausted for ${method} ${path}`);
 }
 
 async function login(email, password, expected = [200]) {
