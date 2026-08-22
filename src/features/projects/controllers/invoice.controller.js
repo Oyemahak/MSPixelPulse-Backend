@@ -25,6 +25,7 @@ import {
   sealInvoiceUploadToken,
 } from "../../../lib/invoiceUploadToken.js";
 import { emitPortalEvent } from "../../../lib/portalEvents.js";
+import { projectsRepository } from "../../../repositories/projects.repository.js";
 
 const VALID_STATUSES = [
   "draft",
@@ -645,10 +646,12 @@ export async function listAuthorizedInvoices(req, res, next) {
       return res.status(403).json({ error: 'Billing access is not available for this role' });
     }
 
-    const projects = await Project.find(projectScopeFor(req.user))
-      .select('_id')
-      .lean();
-    const projectIds = projects.map((project) => String(project._id));
+    const projectResult = await projectsRepository.list({
+      filter: projectScopeFor(req.user),
+      limit: 500,
+      fresh: true,
+    });
+    const projectIds = (projectResult.items || []).map((project) => String(project.id || project._id));
 
     if (!projectIds.length) {
       return res.json({ invoices: [] });

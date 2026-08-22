@@ -10,6 +10,7 @@ import { cleanText } from '../../../lib/validation.js';
 import { projectScopeFor } from '../../../lib/projectAccess.js';
 import { allocateGoogleSequence } from '../../../google/sheets.js';
 import { receiptsRepository } from '../../../repositories/receipts.repository.js';
+import { projectsRepository } from '../../../repositories/projects.repository.js';
 
 const PAYMENT_METHODS = new Set(['Interac e-Transfer', 'Bank transfer', 'Cash', 'Cheque', 'Remitly', 'Other']);
 const MAX_AMOUNT = 100_000_000;
@@ -115,8 +116,12 @@ function clientSafeReceipt(receipt, role = 'admin') {
 export async function listAuthorizedReceipts(req, res, next) {
   try {
     if (!['admin', 'client'].includes(req.user?.role)) return res.status(403).json({ error: 'Receipt access is not available for this role' });
-    const projects = await Project.find(projectScopeFor(req.user)).select('_id').lean();
-    const projectIds = projects.map((project) => idOf(project));
+    const projectResult = await projectsRepository.list({
+      filter: projectScopeFor(req.user),
+      limit: 500,
+      fresh: true,
+    });
+    const projectIds = (projectResult.items || []).map((project) => idOf(project));
     if (!projectIds.length) return res.json({ receipts: [] });
     const rows = await Receipt.find({ project: { $in: projectIds } }).sort({ createdAt: -1 }).lean();
     const receipts = await Promise.all(rows.map(withFreshFile));
