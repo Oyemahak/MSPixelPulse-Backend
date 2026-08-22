@@ -23,6 +23,7 @@
     "normalize:portal": "node --env-file=.env src/scripts/normalizePortalAccounts.js --confirm",
     "test:google-provider": "node --env-file=.env src/scripts/googleProviderSmokeTest.js",
     "verify:google-runtime": "DATA_PROVIDER=google STORAGE_PROVIDER=google-drive node --env-file=.env src/scripts/verifyGoogleRuntime.js --confirm-production",
+    "verify:billing-runtime": "DATA_PROVIDER=google STORAGE_PROVIDER=google-drive node --env-file=.env src/scripts/verifyBillingNotificationRuntime.js --confirm-production",
     "gmail:setup-notification-labels": "node --env-file=.env src/scripts/setupGmailNotificationLabels.js",
     "verify:receipt-pdfs": "node src/scripts/generateReceiptQaSamples.js",
     "migrate:google-tabs": "DATA_PROVIDER=google node --env-file=.env src/scripts/ensureProductionGoogleTabs.js --confirm-production"
