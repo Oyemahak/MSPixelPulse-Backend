@@ -14,6 +14,7 @@ test('notification email preferences default important categories on and honor e
   assert.equal(preferences.billing, true);
   assert.equal(preferences.projects, true);
   assert.equal(preferences.support, true);
+  assert.equal('approvals' in preferences, false);
 });
 
 test('role action URLs preserve deep links without leaking another role route', () => {

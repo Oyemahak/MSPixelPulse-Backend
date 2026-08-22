@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  directMessageAccessInternals,
   peerIdFromThread,
   selectAuthorizedDirectPeers,
 } from './directMessageAccess.js';
@@ -44,4 +45,14 @@ test('peerIdFromThread returns the other participant', () => {
     peerIdFromThread({ participants: ['client-a', 'dev-a'] }, 'client-a'),
     'dev-a',
   );
+});
+
+test('peer presentation resolves durable avatar storage at response time', async () => {
+  const peer = await directMessageAccessInternals.presentPeer(
+    { _id: 'owner', name: 'Portal Admin', role: 'admin', avatarPath: 'avatars/admin/profile.jpg' },
+    async (user) => ({ ...user, avatarUrl: 'https://signed.example/avatar.jpg' }),
+  );
+
+  assert.equal(peer.avatarUrl, 'https://signed.example/avatar.jpg');
+  assert.equal(peer.roleLabel, 'Admin');
 });

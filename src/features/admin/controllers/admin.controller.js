@@ -1092,9 +1092,9 @@ export async function approveUser(
   await user.save();
 
   await emitPortalEvent({
-    type: 'account_approved', category: 'approvals', title: `Account approved - ${user.name || user.email}`,
+    type: 'account_approved', category: 'system', title: `Account activated - ${user.name || user.email}`,
     message: 'The client account was approved and activated.', actor: req.user,
-    relatedEntityType: 'User', relatedEntityId: String(user._id), actionUrl: '/admin/approvals',
+    relatedEntityType: 'User', relatedEntityId: String(user._id), actionUrl: '/admin/users',
     actionUrlByRole: { client: '/client/dashboard' }, targets: { admins: true, userIds: [user._id] },
     dedupeKey: `account-approved:${String(user._id)}:${String(user.updatedAt || Date.now())}`,
   });
@@ -1187,9 +1187,9 @@ export async function rejectUser(
   await user.save();
 
   await emitPortalEvent({
-    type: 'account_declined', category: 'approvals', title: `Account request declined - ${user.name || user.email}`,
+    type: 'account_declined', category: 'system', title: `Account access declined - ${user.name || user.email}`,
     message: 'The pending client account request was declined.', actor: req.user,
-    relatedEntityType: 'User', relatedEntityId: String(user._id), actionUrl: '/admin/approvals',
+    relatedEntityType: 'User', relatedEntityId: String(user._id), actionUrl: '/admin/users',
     targets: { admins: true }, dedupeKey: `account-declined:${String(user._id)}:${String(user.updatedAt || Date.now())}`,
   });
 

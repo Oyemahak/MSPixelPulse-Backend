@@ -46,4 +46,21 @@ test('long names, addresses, tax details, and void state stay on one page', asyn
 test('receipt money and date formatting is stable for Canadian records', () => {
   assert.equal(receiptPdfInternals.formatMoney(1250, 'CAD'), '$1,250.00');
   assert.match(receiptPdfInternals.formatDate('2026-08-22T00:00:00.000Z'), /Aug/);
+  assert.equal(receiptPdfInternals.formatDate(null), '');
+});
+
+test('consolidated receipt with hidden payment method remains a valid one-page PDF', async () => {
+  const bytes = await generateReceiptPdf(receipt({
+    receiptType: 'consolidated',
+    invoiceNumbers: ['MSP-2026-0001', 'MSP-2026-0002'],
+    paymentIds: ['MSP-PAY-2026-000001', 'MSP-PAY-2026-000002'],
+    paymentDate: null,
+    hidePaymentMethod: true,
+    paymentAmountSnapshot: 1000,
+    totalPaidSnapshot: 1000,
+    invoiceTotalSnapshot: 2000,
+    balanceRemainingSnapshot: 1000,
+  }));
+  const document = await PDFDocument.load(bytes);
+  assert.equal(document.getPageCount(), 1);
 });

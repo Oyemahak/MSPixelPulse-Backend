@@ -7,7 +7,7 @@ import { deliverNotification } from './notificationService.js';
 
 export const PORTAL_EVENT_CATEGORIES = Object.freeze([
   'requirements', 'projects', 'messages', 'announcements', 'evidence',
-  'billing', 'leads', 'approvals', 'support', 'system',
+  'billing', 'leads', 'support', 'system',
 ]);
 
 const CATEGORY_TAGS = Object.freeze({
@@ -18,7 +18,6 @@ const CATEGORY_TAGS = Object.freeze({
   evidence: 'EVIDENCE',
   billing: 'BILLING',
   leads: 'LEAD',
-  approvals: 'APPROVAL',
   support: 'SUPPORT',
   system: 'SYSTEM',
 });

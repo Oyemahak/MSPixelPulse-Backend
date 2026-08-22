@@ -92,9 +92,23 @@ async function reconcileInvoicePayment(invoice, receipt) {
   return payment;
 }
 
-function clientSafeReceipt(receipt) {
+function clientSafeReceipt(receipt, role = 'admin') {
   const value = receipt?.toObject?.() || { ...receipt };
   delete value.idempotencyKey;
+  if (role === 'client' && value.hidePaymentMethod) {
+    delete value.method;
+    delete value.paymentReference;
+    delete value.paymentNote;
+    delete value.paymentDate;
+    value.paymentBreakdown = (value.paymentBreakdown || []).map((payment) => {
+      const safePayment = { ...payment };
+      delete safePayment.method;
+      delete safePayment.reference;
+      delete safePayment.note;
+      delete safePayment.date;
+      return safePayment;
+    });
+  }
   return value;
 }
 
@@ -106,7 +120,7 @@ export async function listAuthorizedReceipts(req, res, next) {
     if (!projectIds.length) return res.json({ receipts: [] });
     const rows = await Receipt.find({ project: { $in: projectIds } }).sort({ createdAt: -1 }).lean();
     const receipts = await Promise.all(rows.map(withFreshFile));
-    return res.json({ receipts: receipts.map(clientSafeReceipt) });
+    return res.json({ receipts: receipts.map((receipt) => clientSafeReceipt(receipt, req.user?.role)) });
   } catch (error) {
     return next(error);
   }

@@ -8,6 +8,7 @@ const MUTED = rgb(0.37, 0.42, 0.49);
 const BORDER = rgb(0.87, 0.89, 0.92);
 const SURFACE = rgb(0.96, 0.97, 0.98);
 const WHITE = rgb(1, 1, 1);
+const BLACK = rgb(0.015, 0.02, 0.025);
 
 const LOGO_PATHS = [
   'M914 673L913 904L697 1040L483 904L483 546L560 588L560 858L697 948L836 857L836 641L348 359L348 861L270 861L270 222L483 345L483 186L697 63L913 186L913 255L836 296L836 231L697 152L559 229L559 369L562 392L914 597V673Z',
@@ -25,7 +26,8 @@ function formatMoney(value, currency = 'CAD') {
 }
 
 function formatDate(value) {
-  const date = value ? new Date(value) : new Date();
+  if (!value) return '';
+  const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
   return new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' }).format(date);
 }
@@ -84,7 +86,7 @@ export async function generateReceiptPdf(receipt, { pageSize = 'LETTER' } = {}) 
   const fonts = { regular, medium };
   const right = width - 48;
 
-  LOGO_PATHS.forEach((path) => page.drawSvgPath(path, { x: 45, y: height - 34, scale: 0.035, color: NAVY }));
+  LOGO_PATHS.forEach((path) => page.drawSvgPath(path, { x: 45, y: height - 34, scale: 0.035, color: BLACK }));
   page.drawText('MSPixelPulse', { x: 91, y: height - 48, size: 15, font: medium, color: NAVY });
   page.drawText('Toronto, Ontario, Canada', { x: 91, y: height - 61, size: 7.5, font: regular, color: MUTED });
 
@@ -110,13 +112,54 @@ export async function generateReceiptPdf(receipt, { pageSize = 'LETTER' } = {}) 
   let y = height - 205;
   page.drawLine({ start: { x: 48, y }, end: { x: right, y }, thickness: 0.7, color: BORDER });
   y -= 22;
-  detailRow(page, fonts, { label: 'Receipt date', value: formatDate(receipt.receiptDate) }, { label: 'Payment date', value: formatDate(receipt.paymentDate) }, y, columnWidth);
+  const invoiceNumbers = Array.isArray(receipt.invoiceNumbers) && receipt.invoiceNumbers.length
+    ? receipt.invoiceNumbers
+    : [receipt.invoiceNumber].filter(Boolean);
+  const paymentIds = Array.isArray(receipt.paymentIds) && receipt.paymentIds.length
+    ? receipt.paymentIds
+    : [receipt.paymentId].filter(Boolean);
+  const relatedInvoiceLabel = invoiceNumbers.length > 1 ? 'Related invoices' : 'Related invoice';
+  const paymentIdLabel = paymentIds.length > 1 ? 'Payment IDs' : 'Payment ID';
+  detailRow(
+    page,
+    fonts,
+    { label: 'Receipt date', value: formatDate(receipt.receiptDate) },
+    receipt.hidePaymentMethod
+      ? { label: relatedInvoiceLabel, value: invoiceNumbers.join(', ') }
+      : { label: 'Payment date', value: formatDate(receipt.paymentDate) },
+    y,
+    columnWidth,
+  );
   y -= 42;
-  detailRow(page, fonts, { label: 'Payment method', value: receipt.method }, { label: 'Payment reference', value: receipt.paymentReference || '-' }, y, columnWidth);
+  detailRow(
+    page,
+    fonts,
+    receipt.hidePaymentMethod
+      ? { label: paymentIdLabel, value: paymentIds.join(', ') }
+      : { label: 'Payment method', value: receipt.method },
+    receipt.hidePaymentMethod
+      ? { label: 'Currency', value: receipt.currency }
+      : { label: 'Payment reference', value: receipt.paymentReference || '-' },
+    y,
+    columnWidth,
+  );
   y -= 42;
-  detailRow(page, fonts, { label: 'Related invoice', value: receipt.invoiceNumber }, { label: 'Payment ID', value: receipt.paymentId }, y, columnWidth);
-  y -= 42;
-  detailRow(page, fonts, { label: 'Project', value: receipt.projectTitleSnapshot }, { label: 'Currency', value: receipt.currency }, y, columnWidth);
+  detailRow(
+    page,
+    fonts,
+    receipt.hidePaymentMethod
+      ? { label: 'Project', value: receipt.projectTitleSnapshot }
+      : { label: relatedInvoiceLabel, value: invoiceNumbers.join(', ') },
+    receipt.hidePaymentMethod
+      ? { label: 'Transactions recorded', value: String(paymentIds.length) }
+      : { label: paymentIdLabel, value: paymentIds.join(', ') },
+    y,
+    columnWidth,
+  );
+  if (!receipt.hidePaymentMethod) {
+    y -= 42;
+    detailRow(page, fonts, { label: 'Project', value: receipt.projectTitleSnapshot }, { label: 'Currency', value: receipt.currency }, y, columnWidth);
+  }
   y -= 45;
   label(page, medium, 'Service description', 48, y);
   drawWrapped(page, regular, receipt.serviceDescriptionSnapshot || 'Professional web design and digital services', { x: 48, y: y - 13, size: 8.5, maxWidth: width - 96, maxLines: 2 });
@@ -129,11 +172,12 @@ export async function generateReceiptPdf(receipt, { pageSize = 'LETTER' } = {}) 
   page.drawText(statusText, { x: right - medium.widthOfTextAtSize(statusText, 9) - 16, y: y - 37, size: 9, font: medium, color: rgb(0.61, 0.89, 0.73) });
 
   y -= 91;
+  const consolidated = receipt.receiptType === 'consolidated' || invoiceNumbers.length > 1 || paymentIds.length > 1;
   const summaryRows = [
-    ['Invoice total', receipt.invoiceTotalSnapshot],
+    [consolidated ? 'Invoices total' : 'Invoice total', receipt.invoiceTotalSnapshot],
     ['Previously paid', receipt.previouslyPaidSnapshot],
-    ['This payment', receipt.paymentAmountSnapshot],
-    ['Total paid to date', receipt.totalPaidSnapshot],
+    [consolidated ? 'Amount received' : 'This payment', receipt.paymentAmountSnapshot],
+    [consolidated ? 'Total received' : 'Total paid to date', receipt.totalPaidSnapshot],
     ['Remaining balance', receipt.balanceRemainingSnapshot],
   ];
   page.drawRectangle({ x: 48, y: y - 103, width: width - 96, height: 109, color: SURFACE, borderColor: BORDER, borderWidth: 0.7 });
@@ -154,7 +198,8 @@ export async function generateReceiptPdf(receipt, { pageSize = 'LETTER' } = {}) 
 
   const footerY = 34;
   page.drawLine({ start: { x: 48, y: footerY + 18 }, end: { x: right, y: footerY + 18 }, thickness: 0.6, color: BORDER });
-  page.drawText('mspixelpulse.com | info@mspixelpulse.com', { x: 48, y: footerY, size: 7, font: regular, color: MUTED });
+  const footerContact = [receipt.senderSnapshot?.website || 'mspixelpulse.com', receipt.senderSnapshot?.email].filter(Boolean).join(' | ');
+  page.drawText(footerContact, { x: 48, y: footerY, size: 7, font: regular, color: MUTED });
   const footerRight = `${receipt.receiptNumber} | ${formatDate(receipt.issuedAt)} | Page 1 of 1`;
   page.drawText(footerRight, { x: right - regular.widthOfTextAtSize(footerRight, 7), y: footerY, size: 7, font: regular, color: MUTED });
 

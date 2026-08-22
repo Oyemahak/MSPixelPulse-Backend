@@ -8,6 +8,7 @@ import {
 import {
   presentPresence,
 } from './presence.js';
+import { presentUser } from './presentUser.js';
 
 function idOf(value) {
   if (!value) return '';
@@ -80,23 +81,24 @@ export function selectAuthorizedDirectPeers({
   return [];
 }
 
-function presentPeer(user) {
-  const presence = presentPresence(user);
+async function presentPeer(user, presenter = presentUser) {
+  const presented = await presenter(user);
+  const presence = presented?.presence || presentPresence(presented || user);
 
   return {
-    _id: user._id || user.id,
-    name: user.name || '',
-    email: user.email || '',
-    role: user.role || '',
+    _id: presented?._id || presented?.id,
+    name: presented?.name || '',
+    email: presented?.email || '',
+    role: presented?.role || '',
     roleLabel:
-      user.role === 'admin' && isProtectedAccount(user)
+      presented?.role === 'admin' && isProtectedAccount(presented)
         ? 'Super Admin'
-        : user.role === 'admin'
+        : presented?.role === 'admin'
           ? 'Admin'
-          : user.role === 'developer'
+          : presented?.role === 'developer'
             ? 'Developer'
             : 'Client',
-    avatarUrl: user.avatarUrl || '',
+    avatarUrl: presented?.avatarUrl || '',
     lastSeenAt: presence.lastSeenAt,
     lastActivityAt: presence.lastActivityAt,
     presenceState: presence.state,
@@ -113,7 +115,7 @@ export async function listAuthorizedDirectPeers(currentUser) {
     accountStatus: { $ne: 'suspended' },
   })
     .select(
-      '_id name email role status accountStatus avatarUrl lastSeenAt lastActivityAt presenceState isSuperAdmin isProtected',
+      '_id name email role status accountStatus avatarPath avatarUrl lastSeenAt lastActivityAt presenceState isSuperAdmin isProtected',
     )
     .sort({ role: 1, name: 1 })
     .lean();
@@ -133,11 +135,13 @@ export async function listAuthorizedDirectPeers(currentUser) {
     projectQuery,
   ]);
 
-  return selectAuthorizedDirectPeers({
+  const peers = selectAuthorizedDirectPeers({
     currentUser,
     users,
     projects,
-  }).map(presentPeer);
+  });
+
+  return Promise.all(peers.map((peer) => presentPeer(peer)));
 }
 
 export function peerIdFromThread(thread, currentUserId) {

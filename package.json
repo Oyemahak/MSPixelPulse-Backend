@@ -25,7 +25,9 @@
     "verify:google-runtime": "DATA_PROVIDER=google STORAGE_PROVIDER=google-drive node --env-file=.env src/scripts/verifyGoogleRuntime.js --confirm-production",
     "verify:billing-runtime": "DATA_PROVIDER=google STORAGE_PROVIDER=google-drive node --env-file=.env src/scripts/verifyBillingNotificationRuntime.js --confirm-production",
     "gmail:setup-notification-labels": "node --env-file=.env src/scripts/setupGmailNotificationLabels.js",
+    "billing:create-nexus-production": "DATA_PROVIDER=google STORAGE_PROVIDER=google-drive node --env-file=.env src/scripts/createNexusProductionBilling.js --confirm-production",
     "verify:receipt-pdfs": "node src/scripts/generateReceiptQaSamples.js",
+    "verify:billing-pdfs": "node src/scripts/generateBillingQaSamples.js",
     "migrate:google-tabs": "DATA_PROVIDER=google node --env-file=.env src/scripts/ensureProductionGoogleTabs.js --confirm-production"
   },
   "dependencies": {

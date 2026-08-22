@@ -196,10 +196,10 @@ export async function register(
     });
 
   await emitPortalEvent({
-    type: 'account_approval_requested', category: 'approvals', title: `New account approval request - ${safeName}`,
+    type: 'account_access_requested', category: 'system', title: `New account access request - ${safeName}`,
     message: 'A new client account application is awaiting Administrator review.', actor: user,
-    relatedEntityType: 'User', relatedEntityId: String(user._id || user.id), actionUrl: '/admin/approvals',
-    targets: { admins: true }, dedupeKey: `account-approval-request:${String(user._id || user.id)}`,
+    relatedEntityType: 'User', relatedEntityId: String(user._id || user.id), actionUrl: '/admin/users',
+    targets: { admins: true }, dedupeKey: `account-access-request:${String(user._id || user.id)}`,
   });
 
   return res
