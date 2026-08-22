@@ -87,6 +87,16 @@ Invoice records also persist `paymentStage`, `paymentPercent`, `projectValue`, a
 
 Tax is off by default. Never copy sample GST/HST registration details, small-supplier statements, legal claims, or tax status into production configuration without explicit business-owner input. Client reads exclude drafts, archives, and `internalNotes`; all file access remains scoped to authorized projects and backend-signed Drive access.
 
+Payments use `POST /api/projects/:projectId/invoices/:invoiceId/payments` with a required idempotency key. The server validates amount and overpayment, issues stable payment/receipt identifiers, writes an immutable receipt snapshot, generates a private one-page Letter or A4 PDF, and updates invoice paid/balance/status state. Replaying the same key returns the original successful result.
+
+Receipts are first-class retained records. Authorized Admin/Client reads are project-scoped, Admin void requires a reason, and void never deletes or renumbers a record. Generic invoice update payloads must not mutate payments, `amountPaid`, or `balanceDue`; an invoice with receipt history cannot be deleted.
+
+## Notification Contract
+
+All role-aware events go through the central portal event service. Categories are requirements, projects, messages, announcements, evidence, billing, leads, approvals, support, and system. Each in-app record stores a recipient, role-safe action URL, category, title, message, metadata, read timestamp, and creation timestamp.
+
+Email copies use deterministic `[MSP:CATEGORY]` subjects and `X-MSPixelPulse-Category`. Admin email-category settings are stored in `SiteContent`; disabling one email category does not disable in-app records. Operational delivery has exactly one configured recipient and must not duplicate the existing application recipient mail flow.
+
 ## Presence Contract
 
 User records persist `lastActivityAt`, `lastSeenAt`, and `presenceState`. Login and heartbeat mark online activity; authenticated logout marks explicit offline state. Presence presentation gives explicit offline state precedence over timestamp freshness and safely reports missing or malformed activity as offline.

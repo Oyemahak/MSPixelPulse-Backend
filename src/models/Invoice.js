@@ -32,11 +32,15 @@ const PartySchema = new mongoose.Schema(
 
 const PaymentSchema = new mongoose.Schema(
   {
+    paymentId: { type: String, trim: true, default: "" },
+    receipt: { type: mongoose.Schema.Types.ObjectId, ref: "Receipt", default: null },
+    idempotencyKey: { type: String, trim: true, default: "" },
     amount: { type: Number, min: 0, required: true },
     date: { type: Date, default: Date.now },
     method: { type: String, trim: true, default: "Other" },
     reference: { type: String, trim: true, default: "" },
     note: { type: String, trim: true, default: "" },
+    paymentStage: { type: String, trim: true, default: "other" },
   },
   { _id: false }
 );

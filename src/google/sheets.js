@@ -19,6 +19,9 @@ export const GOOGLE_SHEET_TABS = Object.freeze({
   leads: 'Leads',
   tasks: 'Tasks',
   notifications: 'Notifications',
+  portalNotifications: 'PortalNotifications',
+  receipts: 'Receipts',
+  sequences: 'Sequences',
   files: 'Files',
   blogComments: 'BlogComments',
   blogReactions: 'BlogReactions',
@@ -28,6 +31,43 @@ export const GOOGLE_SHEET_TABS = Object.freeze({
   threads: 'Threads',
   supportTickets: 'SupportTickets',
 });
+
+export async function allocateGoogleSequence({
+  kind,
+  reference = '',
+  spreadsheet = spreadsheetId,
+  sheetsApi,
+} = {}) {
+  const sequenceKind = String(kind || '').trim();
+  if (!sequenceKind) {
+    const error = new Error('A sequence kind is required');
+    error.code = 'GOOGLE_SEQUENCE_KIND_REQUIRED';
+    error.status = 400;
+    throw error;
+  }
+
+  const targetSpreadsheetId = resolveSpreadsheetId(spreadsheet);
+  const sheets = sheetsApi || (await getGoogleApis()).sheets;
+  const response = await withGoogleRetry(() => sheets.spreadsheets.values.append({
+    spreadsheetId: targetSpreadsheetId,
+    range: `${quotedSheetName(GOOGLE_SHEET_TABS.sequences)}!A:C`,
+    valueInputOption: 'RAW',
+    insertDataOption: 'INSERT_ROWS',
+    requestBody: {
+      values: [[sequenceKind, String(reference || '').trim(), new Date().toISOString()]],
+    },
+  }));
+  const updatedRange = String(response?.data?.updates?.updatedRange || '');
+  const rowMatch = updatedRange.match(/![A-Z]+(\d+):[A-Z]+\d+$/i);
+  const sequence = Number(rowMatch?.[1]);
+  if (!Number.isSafeInteger(sequence) || sequence < 1) {
+    const error = new Error('Google Sheets did not return a sequence row');
+    error.code = 'GOOGLE_SEQUENCE_ALLOCATION_FAILED';
+    error.status = 503;
+    throw error;
+  }
+  return sequence;
+}
 
 function spreadsheetId() {
   const value = String(
@@ -819,6 +859,7 @@ export class GoogleSheetsRepository {
     page = 1,
     limit = 100,
     sort,
+    fresh = false,
   } = {}) {
     const safePage =
       Math.max(
@@ -837,7 +878,7 @@ export class GoogleSheetsRepository {
 
     let items =
       (
-        await this.readRows()
+        await this.readRows({ fresh })
       ).records
         .map(
           ({ record }) =>

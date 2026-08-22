@@ -13,11 +13,17 @@ import {
   startInvoiceUpload,
   relayInvoiceUploadChunk,
 } from "../features/projects/controllers/invoice.controller.js";
+import {
+  listAuthorizedReceipts,
+  recordPayment,
+  voidReceipt,
+} from "../features/projects/controllers/receipt.controller.js";
 
 const router = Router();
 
 // GET /api/invoices (role-scoped batch read)
 router.get("/invoices", requireAuth, listAuthorizedInvoices);
+router.get("/receipts", requireAuth, listAuthorizedReceipts);
 router.get("/invoices/next-number", requireAuth, getNextInvoiceNumber);
 router.get("/invoice-settings", requireAuth, getInvoiceSettings);
 router.patch("/invoice-settings", requireAuth, updateInvoiceSettings);
@@ -47,6 +53,14 @@ router.patch(
   requireAuth,
   updateInvoice
 );
+
+router.post(
+  "/projects/:projectId/invoices/:invoiceId/payments",
+  requireAuth,
+  recordPayment,
+);
+
+router.patch("/receipts/:receiptId/void", requireAuth, voidReceipt);
 
 // DELETE /api/projects/:projectId/invoices/:invoiceId
 router.delete(

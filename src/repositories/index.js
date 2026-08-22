@@ -8,6 +8,8 @@ export { invoicesRepository } from './invoices.repository.js';
 export { leadsRepository } from './leads.repository.js';
 export { tasksRepository } from './tasks.repository.js';
 export { notificationsRepository } from './notifications.repository.js';
+export { portalNotificationsRepository } from './portalNotifications.repository.js';
+export { receiptsRepository } from './receipts.repository.js';
 export { filesRepository } from './files.repository.js';
 export { blogCommentsRepository } from './blogComments.repository.js';
 export { blogReactionsRepository } from './blogReactions.repository.js';

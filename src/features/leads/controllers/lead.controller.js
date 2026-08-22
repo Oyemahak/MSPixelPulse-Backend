@@ -1,8 +1,8 @@
 import Lead from "../../../models/Lead.js";
 import { cleanPublicUrl, cleanText, isValidEmail, normalizeEmail } from "../../../lib/validation.js";
 import { deliverNotification } from "../../../lib/notificationService.js";
-import { notificationRecipients } from "../../../lib/mailer.js";
 import { contactConfirmationEmail, contactNotificationEmail } from "../../../lib/emailTemplates.js";
+import { emitPortalEvent, portalEventInternals } from "../../../lib/portalEvents.js";
 
 const maxLengths = {
   inquiryType: 80,
@@ -57,7 +57,7 @@ export async function createLead(req, res) {
       ip: req.ip,
       ua: cleanText(req.get("user-agent"), 500),
     });
-    const internalRecipients = notificationRecipients();
+    const internalRecipients = [portalEventInternals.operationalRecipient()];
     const notificationPromise = deliverNotification({
       type: "contact_notification",
       relatedEntityType: "Lead",
@@ -85,6 +85,14 @@ export async function createLead(req, res) {
     lead.confirmationEmailStatus = confirmationLog.status;
     await lead.save();
 
+    await emitPortalEvent({
+      type: 'lead_created', category: 'leads', title: `New website lead - ${lead.businessName || lead.name}`,
+      message: `${lead.inquiryType || 'Website inquiry'} was saved for Administrator review.`,
+      relatedEntityType: 'Lead', relatedEntityId: String(lead._id), actionUrl: '/admin/leads',
+      targets: { admins: true }, dedupeKey: `lead-in-app:${String(lead._id)}`,
+      operationalEmail: false, metadata: { reference: String(lead._id) },
+    });
+
     return res.status(201).json({
       ok: true,
       leadId: lead._id,
@@ -103,7 +111,7 @@ export async function retryLeadNotification(lead, existingLog) {
     type: existingLog.notificationType,
     relatedEntityType: "Lead",
     relatedEntityId: lead._id,
-    recipients: isConfirmation ? [lead.email] : notificationRecipients(),
+    recipients: isConfirmation ? [lead.email] : [portalEventInternals.operationalRecipient()],
     message: isConfirmation ? contactConfirmationEmail(lead) : contactNotificationEmail(lead),
     metadata: existingLog.metadata,
     existingLog,

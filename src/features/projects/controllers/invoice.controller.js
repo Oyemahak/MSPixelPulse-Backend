@@ -3,6 +3,7 @@ import crypto from "crypto";
 
 import Invoice from "../../../models/Invoice.js";
 import Project from "../../../models/Project.js";
+import Receipt from "../../../models/Receipt.js";
 import SiteContent from "../../../models/SiteContent.js";
 import { signedURL as createSignedUrl, removeObject as removePath } from "../../../lib/storage.js";
 import {
@@ -23,6 +24,7 @@ import {
   openInvoiceUploadToken,
   sealInvoiceUploadToken,
 } from "../../../lib/invoiceUploadToken.js";
+import { emitPortalEvent } from "../../../lib/portalEvents.js";
 
 const VALID_STATUSES = [
   "draft",
@@ -156,6 +158,9 @@ function normalizePayments(items = []) {
   if (!Array.isArray(items)) return [];
 
   return items.slice(0, MAX_PAYMENTS).map((item) => ({
+    paymentId: cleanText(item?.paymentId, 80),
+    receipt: item?.receipt || null,
+    idempotencyKey: cleanText(item?.idempotencyKey, 160),
     amount: money(item?.amount),
     date: item?.date || new Date().toISOString(),
     method: PAYMENT_METHODS.has(String(item?.method || ""))
@@ -163,7 +168,16 @@ function normalizePayments(items = []) {
       : "Other",
     reference: cleanText(item?.reference, 160),
     note: cleanText(item?.note, 500),
+    paymentStage: cleanText(item?.paymentStage, 40) || "other",
   })).filter((item) => item.amount > 0);
+}
+
+function withoutPaymentMutations(body = {}) {
+  const safe = { ...(body || {}) };
+  delete safe.payments;
+  delete safe.amountPaid;
+  delete safe.balanceDue;
+  return safe;
 }
 
 function normalizePaymentMethods(items, fallback = []) {
@@ -695,7 +709,7 @@ export async function startInvoiceUpload(req, res, next) {
       if (!existing) return res.status(404).json({ error: 'Invoice not found' });
     }
 
-    const invoice = invoiceDetails(req.body?.invoice || {});
+    const invoice = invoiceDetails(withoutPaymentMutations(req.body?.invoice || {}));
     invoice.invoiceNumber = await invoiceNumberFor(
       invoice.invoiceNumber || existing?.invoiceNumber,
       invoiceId,
@@ -839,7 +853,7 @@ export async function relayInvoiceUploadChunk(req, res, next) {
 
       const previousFile = invoice.file?.toObject?.() || invoice.file || null;
       const patch = buildInvoicePayload(
-        { ...claims.invoice, kind: claims.kind, file },
+        { ...withoutPaymentMutations(claims.invoice), kind: claims.kind, file },
         project,
         req.user,
         invoice.toObject(),
@@ -874,7 +888,7 @@ export async function relayInvoiceUploadChunk(req, res, next) {
         claims.invoice?.invoiceNumber,
       );
       const payload = buildInvoicePayload(
-        { ...claims.invoice, kind: claims.kind, file },
+        { ...withoutPaymentMutations(claims.invoice), kind: claims.kind, file },
         project,
         req.user,
       );
@@ -894,6 +908,22 @@ export async function relayInvoiceUploadChunk(req, res, next) {
         sentAt: status === 'sent' ? new Date() : null,
       });
     }
+
+    await emitPortalEvent({
+      type: claims.invoiceId ? 'invoice_updated' : 'invoice_created',
+      category: 'billing',
+      title: `${claims.invoiceId ? 'Invoice updated' : 'Invoice created'} - ${invoice.invoiceNumber || 'Invoice'}`,
+      message: 'Billing details and the secure invoice file are available in the portal.',
+      actor: req.user,
+      project,
+      relatedEntityType: 'Invoice',
+      relatedEntityId: String(invoice._id),
+      actionUrl: '/admin/billing',
+      actionUrlByRole: { client: '/client/billing' },
+      targets: { admins: true, client: invoice.status !== 'draft' },
+      dedupeKey: `invoice-file:${String(invoice._id)}:${String(invoice.updatedAt || Date.now())}`,
+      metadata: { invoiceNumber: invoice.invoiceNumber },
+    });
 
     uploadedPath = '';
 
@@ -919,7 +949,7 @@ export async function createInvoice(req, res, next) {
     if (!project) return res.status(404).json({ error: "Project not found" });
     if (!canWrite(req.user, project)) return projectAccessError(res);
 
-    const body = req.body || {};
+    const body = withoutPaymentMutations(req.body || {});
     const file = body.file;
     const kind = normalizeKind(body.kind || 'other');
     if (!kind) return res.status(400).json({ error: 'Invalid invoice kind' });
@@ -953,6 +983,15 @@ export async function createInvoice(req, res, next) {
       paidAt: status === "paid" ? new Date() : null,
       sentAt: status === "sent" ? new Date() : null,
     });
+    await emitPortalEvent({
+      type: 'invoice_created', category: 'billing',
+      title: `Invoice created - ${doc.invoiceNumber || 'Invoice'}`,
+      message: doc.status === 'draft' ? 'A draft invoice was created.' : 'A new invoice is available in the portal.',
+      actor: req.user, project, relatedEntityType: 'Invoice', relatedEntityId: String(doc._id),
+      actionUrl: '/admin/billing', actionUrlByRole: { client: '/client/billing' },
+      targets: { admins: true, client: doc.status !== 'draft' },
+      dedupeKey: `invoice-created:${String(doc._id)}`, metadata: { invoiceNumber: doc.invoiceNumber },
+    });
     res.status(201).json({ ok: true, invoice: doc });
   } catch (err) {
     next(err);
@@ -964,7 +1003,7 @@ export async function updateInvoice(req, res, next) {
   try {
     if (req.user?.role !== "admin") return res.status(403).json({ error: "Admin only" });
     const { projectId, invoiceId } = req.params;
-    const body = req.body || {};
+    const body = withoutPaymentMutations(req.body || {});
     const doc = await Invoice.findOne({ _id: invoiceId, project: projectId });
     if (!doc) return res.status(404).json({ error: "Invoice not found" });
 
@@ -988,6 +1027,16 @@ export async function updateInvoice(req, res, next) {
 
     Object.assign(doc, patch);
     await doc.save();
+    await emitPortalEvent({
+      type: body.status === 'sent' ? 'invoice_published' : 'invoice_updated', category: 'billing',
+      title: `${body.status === 'sent' ? 'Invoice sent' : 'Invoice updated'} - ${doc.invoiceNumber || 'Invoice'}`,
+      message: body.status === 'sent' ? 'The invoice is now available to the client.' : 'Invoice details were updated.',
+      actor: req.user, project: projectId, relatedEntityType: 'Invoice', relatedEntityId: String(doc._id),
+      actionUrl: '/admin/billing', actionUrlByRole: { client: '/client/billing' },
+      targets: { admins: true, client: doc.status !== 'draft' },
+      dedupeKey: `invoice-update:${String(doc._id)}:${String(doc.updatedAt || Date.now())}`,
+      metadata: { invoiceNumber: doc.invoiceNumber },
+    });
     res.json({ ok: true, invoice: doc });
   } catch (err) {
     next(err);
@@ -1001,6 +1050,10 @@ export async function deleteInvoice(req, res, next) {
     const { projectId, invoiceId } = req.params;
     const doc = await Invoice.findOne({ _id: invoiceId, project: projectId });
     if (!doc) return res.status(404).json({ error: "Invoice not found" });
+    const receiptCount = await Receipt.countDocuments({ invoice: invoiceId });
+    if (receiptCount > 0) {
+      return res.status(409).json({ error: 'Invoices with issued receipt records cannot be deleted. Archive the invoice instead.' });
+    }
     if (doc.file?.path) {
       if (!pathBelongsToProjectPurpose(doc.file.path, projectId, 'invoice')) {
         return res.status(409).json({ error: 'Stored file path is outside this project; deletion stopped' });
@@ -1025,5 +1078,6 @@ export const invoiceUploadInternals = {
   normalizePaymentStage,
   normalizePaymentTermsPreset,
   normalizeInvoiceSettings,
+  withoutPaymentMutations,
   uploadRange,
 };

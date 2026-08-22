@@ -4,7 +4,8 @@ const siteUrl = String(process.env.PUBLIC_SITE_URL || "https://mspixelpulse.com"
 
 export function contactNotificationEmail(lead) {
   return {
-    subject: `${lead.inquiryType || "Website inquiry"}: ${lead.name}`,
+    subject: `[MSP:LEAD] ${lead.inquiryType || "Website inquiry"} - ${lead.businessName || lead.name}`,
+    headers: { 'X-MSPixelPulse-Category': 'leads' },
     replyTo: `${lead.name} <${lead.email}>`,
     ...brandedEmail({
       eyebrow: "New website inquiry",

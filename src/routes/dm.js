@@ -20,9 +20,7 @@ import {
   withCanonicalMessageTimestamp,
 } from '../lib/messageTimestamp.js';
 
-import {
-  notifySuperAdminOfPortalMessage,
-} from '../lib/portalMessageNotification.js';
+import { emitPortalEvent } from '../lib/portalEvents.js';
 
 import {
   listAuthorizedDirectPeers,
@@ -89,37 +87,6 @@ async function authorizedThread(req, threadId) {
   const peer = peerMap(peers).get(peerIdFromThread(thread, me));
 
   return peer ? { thread, peer } : null;
-}
-
-async function sendDirectNotification({
-  sender,
-  recipient,
-  message,
-  thread,
-}) {
-  try {
-    await notifySuperAdminOfPortalMessage({
-      channel:
-        'dm',
-
-      sender,
-
-      recipient,
-
-      message,
-
-      threadId:
-        thread?._id ||
-        thread?.id,
-    });
-  } catch (error) {
-    console.warn(
-      'Portal direct-message notification failed:',
-      error?.code ||
-        error?.message ||
-        'unknown error',
-    );
-  }
 }
 
 /**
@@ -619,15 +586,21 @@ router.post(
           },
         );
 
-      void sendDirectNotification({
-        sender:
-          me,
-
-        recipient,
-
-        message,
-
-        thread,
+      await emitPortalEvent({
+        type: 'direct_message_received',
+        category: 'messages',
+        title: `New direct message from ${me.name || me.email || 'Portal user'}`,
+        message: body.text || 'A new attachment was sent in a direct conversation.',
+        actor: me,
+        relatedEntityType: 'Message',
+        relatedEntityId: String(messageRecord._id),
+        actionUrlByRole: {
+          admin: `/admin/messages/${me._id}`,
+          developer: `/dev/messages/${me._id}`,
+          client: `/client/messages/${me._id}`,
+        },
+        targets: { userIds: [recipient._id], excludeActor: true },
+        dedupeKey: `direct-message:${String(messageRecord._id)}`,
       });
 
       return res.json({

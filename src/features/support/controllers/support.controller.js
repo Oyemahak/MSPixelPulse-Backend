@@ -1,5 +1,6 @@
 import SupportTicket from '../../../models/SupportTicket.js';
 import { cleanText } from '../../../lib/validation.js';
+import { emitPortalEvent } from '../../../lib/portalEvents.js';
 
 const CLIENT_STATUSES = new Set(['open', 'closed']);
 const ADMIN_STATUSES = new Set(['open', 'in_progress', 'resolved', 'closed']);
@@ -56,6 +57,12 @@ export async function createTicket(req, res) {
       sentAt: new Date(),
     }],
   });
+  await emitPortalEvent({
+    type: 'support_request_opened', category: 'support', title: `New support request - ${subject}`,
+    message: body, actor: req.user, relatedEntityType: 'SupportTicket', relatedEntityId: String(ticket._id),
+    actionUrl: '/admin/notifications', actionUrlByRole: { client: '/client/support' },
+    targets: { admins: true }, dedupeKey: `support-opened:${String(ticket._id)}`,
+  });
   res.status(201).json({ ticket });
 }
 
@@ -78,6 +85,13 @@ export async function replyToTicket(req, res) {
   if (req.user.role === 'client' && ticket.status !== 'open') ticket.status = 'open';
   if (req.user.role === 'admin' && ticket.status === 'open') ticket.status = 'in_progress';
   await ticket.save();
+  await emitPortalEvent({
+    type: 'support_reply', category: 'support', title: `Support reply - ${ticket.subject}`,
+    message: body, actor: req.user, relatedEntityType: 'SupportTicket', relatedEntityId: String(ticket._id),
+    actionUrl: '/admin/notifications', actionUrlByRole: { client: '/client/support' },
+    targets: req.user.role === 'client' ? { admins: true } : { userIds: [ticket.requester] },
+    dedupeKey: `support-reply:${String(ticket._id)}:${String(ticket.lastActivityAt)}`,
+  });
   res.json({ ticket });
 }
 
@@ -93,5 +107,13 @@ export async function updateTicket(req, res) {
   ticket.status = status;
   ticket.lastActivityAt = new Date();
   await ticket.save();
+  await emitPortalEvent({
+    type: 'support_status_changed', category: 'support', title: `Support status changed - ${ticket.subject}`,
+    message: `The support request is now ${status.replace('_', ' ')}.`, actor: req.user,
+    relatedEntityType: 'SupportTicket', relatedEntityId: String(ticket._id),
+    actionUrl: '/admin/notifications', actionUrlByRole: { client: '/client/support' },
+    targets: req.user.role === 'client' ? { admins: true } : { userIds: [ticket.requester] },
+    dedupeKey: `support-status:${String(ticket._id)}:${status}:${String(ticket.lastActivityAt)}`,
+  });
   res.json({ ticket });
 }

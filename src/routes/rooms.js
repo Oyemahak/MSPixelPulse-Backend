@@ -27,6 +27,7 @@ import {
 import {
   signedURL,
 } from "../lib/storage.js";
+import { emitPortalEvent } from "../lib/portalEvents.js";
 
 const router = express.Router();
 
@@ -103,7 +104,7 @@ router.get(
         projectId,
       )
         .select(
-          "_id client developer",
+          "_id title client developer",
         )
         .lean();
 
@@ -273,7 +274,7 @@ router.post(
         projectId,
       )
         .select(
-          "_id client developer",
+          "_id title client developer",
         )
         .lean();
 
@@ -378,6 +379,21 @@ router.post(
           message,
         },
       );
+
+    await emitPortalEvent({
+      type: 'project_room_message',
+      category: 'messages',
+      title: `New project-room message - ${project.title || 'Project'}`,
+      message: body.text || 'A new attachment was posted in the project room.',
+      actor: req.user,
+      project,
+      relatedEntityType: 'Message',
+      relatedEntityId: String(messageRecord._id),
+      actionUrl: `/admin/discussions/${projectId}`,
+      actionUrlByRole: { client: `/client/discussions/${projectId}`, developer: `/dev/discussions/${projectId}` },
+      targets: { admins: true, client: true, developer: true, excludeActor: true },
+      dedupeKey: `room-message:${String(messageRecord._id)}`,
+    });
 
     return res.json({
       ok: true,

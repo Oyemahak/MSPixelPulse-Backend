@@ -10,6 +10,7 @@ import {
   projectAccessError,
   projectScopeFor,
 } from '../../../lib/projectAccess.js';
+import { emitPortalEvent } from '../../../lib/portalEvents.js';
 
 /* Populate user refs consistently */
 const POP = [
@@ -264,6 +265,14 @@ export async function createProject(req, res) {
   });
 
   const project = await Project.findById(created._id).populate(POP);
+  await emitPortalEvent({
+    type: 'project_created', category: 'projects', title: `Project created - ${project.title}`,
+    message: 'A new project workspace was created and assigned participants can now access it.',
+    actor: req.user, project, relatedEntityType: 'Project', relatedEntityId: String(project._id),
+    actionUrl: `/admin/projects/${project._id}`,
+    actionUrlByRole: { client: `/client/projects/${project._id}`, developer: `/dev/projects/${project._id}` },
+    targets: { admins: true, client: true, developer: true }, dedupeKey: `project-created:${project._id}`,
+  });
   res.status(201).json({ project: await presentProject(project) });
 }
 
@@ -318,6 +327,9 @@ export async function updateProject(req, res) {
   }
 
   const previousCoverPath = project.coverImage?.path || '';
+  const previousStatus = project.status;
+  const previousClient = String(project.client || '');
+  const previousDeveloper = String(project.developer || '');
   const updated = await Project.findByIdAndUpdate(projectId, patch, {
     new: true,
     runValidators: true,
@@ -331,6 +343,23 @@ export async function updateProject(req, res) {
     } catch {
       cleanupPending = true;
     }
+  }
+
+  const changed = [];
+  if ('status' in patch && patch.status !== previousStatus) changed.push(`status changed to ${patch.status}`);
+  if ('client' in patch && String(patch.client || '') !== previousClient) changed.push('client assignment changed');
+  if ('developer' in patch && String(patch.developer || '') !== previousDeveloper) changed.push('developer assignment changed');
+  if (changed.length) {
+    await emitPortalEvent({
+      type: changed.some((item) => item.includes('assignment')) ? 'project_assignment_changed' : 'project_status_changed',
+      category: 'projects', title: `Project updated - ${updated.title}`,
+      message: changed.join('; '), actor: req.user, project: updated,
+      relatedEntityType: 'Project', relatedEntityId: projectId,
+      actionUrl: `/admin/projects/${projectId}`,
+      actionUrlByRole: { client: `/client/projects/${projectId}`, developer: `/dev/projects/${projectId}` },
+      targets: { admins: true, client: true, developer: true },
+      dedupeKey: `project-update:${projectId}:${String(updated.updatedAt || Date.now())}`,
+    });
   }
 
   res.json({ project: await presentProject(updated), cleanupPending });
@@ -442,6 +471,14 @@ export async function addEvidence(req, res) {
 
   await project.save();
   const populated = await Project.findById(projectId).populate(POP);
+  await emitPortalEvent({
+    type: 'evidence_uploaded', category: 'evidence', title: `Evidence uploaded - ${project.title}`,
+    message: `${cleanText(title, 160) || 'Project evidence'} was added to the delivery record.`,
+    actor: me, project, relatedEntityType: 'ProjectEvidence', relatedEntityId: `${projectId}:${project.evidence[0]?.ts || Date.now()}`,
+    actionUrl: `/admin/projects/${projectId}`, actionUrlByRole: { client: `/client/projects/${projectId}`, developer: `/dev/projects/${projectId}` },
+    targets: { admins: true, client: true, developer: true },
+    dedupeKey: `evidence:${projectId}:${project.evidence[0]?.ts || Date.now()}`,
+  });
   res.status(201).json({ ok: true, project: await presentProject(populated) });
 }
 
@@ -484,6 +521,14 @@ export async function createAnnouncement(req, res) {
   };
   project.announcements.unshift(entry);
   await project.save();
+
+  await emitPortalEvent({
+    type: 'announcement_created', category: 'announcements', title: `New announcement - ${entry.title}`,
+    message: entry.body || `A new announcement was posted for ${project.title}.`,
+    actor: me, project, relatedEntityType: 'ProjectAnnouncement', relatedEntityId: `${projectId}:${entry.ts}`,
+    actionUrl: `/admin/projects/${projectId}`, actionUrlByRole: { client: `/client/projects/${projectId}`, developer: `/dev/projects/${projectId}` },
+    targets: { admins: true, client: true, developer: true }, dedupeKey: `announcement:${projectId}:${entry.ts}`,
+  });
 
   const populated = await Project.findById(projectId).populate(POP);
   res.status(201).json({ ok: true, announcement: entry, project: populated });

@@ -82,7 +82,7 @@ function clientFolderRole(category) {
 
 function projectFolderRole(category) {
   if (['core', 'supporting', 'pages', 'requirement', 'requirements'].includes(category)) return 'Requirements';
-  if (['invoice', 'invoices'].includes(category)) return 'Invoices';
+  if (['invoice', 'invoices', 'receipt', 'receipts'].includes(category)) return 'Invoices';
   if (['evidence', 'cover', 'deliverables'].includes(category)) return 'Deliverables';
   if (['message', 'messages', 'message-attachments'].includes(category)) return 'Message Attachments';
   return 'Uploads';

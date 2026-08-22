@@ -3,6 +3,8 @@ import { usersRepository } from '../repositories/users.repository.js';
 import Invoice from '../models/Invoice.js';
 import Message from '../models/Message.js';
 import Project from '../models/Project.js';
+import PortalNotification from '../models/PortalNotification.js';
+import Receipt from '../models/Receipt.js';
 import Requirement from '../models/Requirement.js';
 import Room from '../models/Room.js';
 import SupportTicket from '../models/SupportTicket.js';
@@ -464,6 +466,84 @@ try {
     throw new Error('Generated invoice was not fully visible to the assigned client');
   }
 
+  const idempotencyKey = `${marker}-payment`;
+  const paymentResult = record('admin records invoice payment and generates receipt', await request(
+    `/projects/${projectA._id}/invoices/${uploadedInvoice.invoice._id}/payments`,
+    {
+      method: 'POST',
+      token: adminToken,
+      expected: [201],
+      json: {
+        idempotencyKey,
+        amount: 125,
+        date: issueDate,
+        method: 'Interac e-Transfer',
+        reference: marker,
+        note: 'Disposable production runtime verification',
+        paymentStage: 'custom',
+      },
+    },
+  ), [201]);
+  resources.paths.push(paymentResult.receipt.file.path);
+  if (
+    !/^MSP-PAY-\d{4}-\d{6}$/.test(paymentResult.payment.paymentId || '') ||
+    !/^MSP-RCT-\d{4}-\d{6}$/.test(paymentResult.receipt.receiptNumber || '') ||
+    paymentResult.receipt.paymentAmountSnapshot !== 125 ||
+    paymentResult.receipt.balanceRemainingSnapshot !== 375 ||
+    paymentResult.invoice.status !== 'partially_paid'
+  ) {
+    throw new Error('Stable payment identifiers, receipt snapshot, or invoice balance did not persist');
+  }
+  const paymentSequence = String(paymentResult.payment.paymentId).split('-').at(-1);
+  const receiptSequence = String(paymentResult.receipt.receiptNumber).split('-').at(-1);
+  if (paymentSequence !== receiptSequence) throw new Error('Payment and receipt did not share one stable sequence');
+
+  const replay = record('payment idempotency replay returns original receipt', await request(
+    `/projects/${projectA._id}/invoices/${uploadedInvoice.invoice._id}/payments`,
+    {
+      method: 'POST', token: adminToken, json: { idempotencyKey, amount: 125, method: 'Interac e-Transfer' },
+    },
+  ), [200]);
+  if (!replay.duplicate || replay.receipt.receiptNumber !== paymentResult.receipt.receiptNumber) {
+    throw new Error('Payment idempotency replay created a different receipt');
+  }
+
+  const clientReceipts = record('client reads authorized receipts', await request('/receipts', {
+    token: clientAToken,
+  }), [200]);
+  const clientReceipt = clientReceipts.receipts?.find((receipt) => receipt.receiptNumber === paymentResult.receipt.receiptNumber);
+  if (!clientReceipt?.file?.url || clientReceipt.idempotencyKey) {
+    throw new Error('Client receipt was not private, downloadable, and safely presented');
+  }
+  const receiptDownload = await fetch(clientReceipt.file.url);
+  const receiptBytes = Buffer.from(await receiptDownload.arrayBuffer());
+  checks.push({ name: 'private receipt PDF download', status: receiptDownload.status, passed: receiptDownload.status === 200 });
+  if (receiptDownload.status !== 200 || receiptBytes.subarray(0, 4).toString() !== '%PDF') {
+    throw new Error('Private receipt PDF download failed');
+  }
+
+  const voided = record('admin voids receipt without deleting audit record', await request(
+    `/receipts/${paymentResult.receipt._id}/void`,
+    { method: 'PATCH', token: adminToken, json: { reason: 'Disposable production runtime verification' } },
+  ), [200]);
+  if (voided.receipt.status !== 'void' || !voided.receipt.voidedAt || !voided.receipt.voidReason) {
+    throw new Error('Void audit state did not persist');
+  }
+
+  let notificationResult;
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    notificationResult = record(`client reads notifications (attempt ${attempt})`, await request('/notifications?limit=100', {
+      token: clientAToken,
+    }), [200]);
+    if (notificationResult.notifications?.some((notification) => notification.relatedEntityType === 'Receipt')) break;
+    await new Promise((resolve) => setTimeout(resolve, 750 * attempt));
+  }
+  const receiptNotification = notificationResult.notifications?.find((notification) => notification.relatedEntityType === 'Receipt');
+  if (!receiptNotification || !notificationResult.unreadCount) throw new Error('Role-aware receipt notification did not persist');
+  record('client marks one notification read', await request(`/notifications/${receiptNotification._id}/read`, {
+    method: 'PATCH', token: clientAToken,
+  }), [200]);
+
   const ticket = record('client creates support request', await request('/support', {
     method: 'POST', token: clientAToken, expected: [201], json: { subject: marker, message: 'Runtime support request' },
   }), [201]).ticket;
@@ -585,6 +665,10 @@ try {
   await cleanup('Drive files', () => removePaths(resources.paths));
   await cleanup('messages', () => Message.deleteMany({ project: { $in: resources.projects } }));
   await cleanup('requirements', () => Requirement.deleteMany({ project: { $in: resources.projects } }));
+  await cleanup('portal notifications', () => PortalNotification.deleteMany({
+    $or: [{ project: { $in: resources.projects } }, { recipient: { $in: resources.users } }],
+  }));
+  await cleanup('receipts', () => Receipt.deleteMany({ project: { $in: resources.projects } }));
   await cleanup('invoices', () => Invoice.deleteMany({ project: { $in: resources.projects } }));
   await cleanup('rooms', () => Room.deleteMany({ project: { $in: resources.projects } }));
   await cleanup('support tickets', () => SupportTicket.deleteMany({ _id: { $in: resources.tickets } }));
@@ -596,17 +680,19 @@ try {
   }));
 
   await cleanup('cleanup verification', async () => {
-    const [userCount, projectCount, messageCount, requirementCount, invoiceCount, ticketCount, fileRows] = await Promise.all([
+    const [userCount, projectCount, messageCount, requirementCount, notificationCount, receiptCount, invoiceCount, ticketCount, fileRows] = await Promise.all([
       User.countDocuments({ email: { $regex: marker, $options: 'i' } }),
       Project.countDocuments({ title: { $regex: marker, $options: 'i' } }),
       Message.countDocuments({ text: { $regex: marker, $options: 'i' } }),
       Requirement.countDocuments({ 'pages.note': { $regex: marker, $options: 'i' } }),
+      PortalNotification.countDocuments({ project: { $in: resources.projects } }),
+      Receipt.countDocuments({ paymentReference: marker }),
       Invoice.countDocuments({ invoiceNumber: marker }),
       SupportTicket.countDocuments({ subject: marker }),
       googleFilesRepository.list({ pageSize: 1000 }),
     ]);
     const markedFiles = fileRows.items.filter((file) => String(file.originalName || file.logicalPath || '').includes(marker)).length;
-    const remaining = userCount + projectCount + messageCount + requirementCount + invoiceCount + ticketCount + markedFiles;
+    const remaining = userCount + projectCount + messageCount + requirementCount + notificationCount + receiptCount + invoiceCount + ticketCount + markedFiles;
     if (remaining) throw new Error(`${remaining} runtime QA records remain after cleanup`);
   });
   if (cleanupErrors.length) {

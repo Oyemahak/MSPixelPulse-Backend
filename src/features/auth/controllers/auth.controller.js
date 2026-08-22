@@ -23,6 +23,7 @@ import {
 import {
   usersRepository,
 } from '../../../repositories/users.repository.js';
+import { emitPortalEvent } from '../../../lib/portalEvents.js';
 
 const COOKIE_NAME =
   'token';
@@ -193,6 +194,13 @@ export async function register(
           new Date(),
       },
     });
+
+  await emitPortalEvent({
+    type: 'account_approval_requested', category: 'approvals', title: `New account approval request - ${safeName}`,
+    message: 'A new client account application is awaiting Administrator review.', actor: user,
+    relatedEntityType: 'User', relatedEntityId: String(user._id || user.id), actionUrl: '/admin/approvals',
+    targets: { admins: true }, dedupeKey: `account-approval-request:${String(user._id || user.id)}`,
+  });
 
   return res
     .status(201)

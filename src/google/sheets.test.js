@@ -4,10 +4,34 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  allocateGoogleSequence,
   ensureGoogleSheetTabs,
   GoogleSheetsRepository,
   sheetsInternals,
 } from './sheets.js';
+
+test('Google sequence allocation uses the atomic append row returned by Sheets', async () => {
+  let request;
+  const sheetsApi = {
+    spreadsheets: {
+      values: {
+        append: async (input) => {
+          request = input;
+          return { data: { updates: { updatedRange: "'Sequences'!A42:C42" } } };
+        },
+      },
+    },
+  };
+  const sequence = await allocateGoogleSequence({
+    kind: 'receipt',
+    reference: 'idem-example',
+    spreadsheet: 'test-spreadsheet',
+    sheetsApi,
+  });
+  assert.equal(sequence, 42);
+  assert.equal(request.range, "'Sequences'!A:C");
+  assert.deepEqual(request.requestBody.values[0].slice(0, 2), ['receipt', 'idem-example']);
+});
 
 test(
   'Google Sheets helper uses spreadsheet row positions only internally and preserves structured cells',

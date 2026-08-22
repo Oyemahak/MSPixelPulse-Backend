@@ -1,5 +1,11 @@
 # Agent System Changelog
 
+## 2026-08-22
+- Added first-class `PortalNotifications` and `Receipts` provider-backed records, central event fan-out, role-aware recipients/deep links, explicit read state, and Admin operational-email category settings.
+- Added dedicated idempotent payment recording, stable payment/receipt identifiers, immutable snapshots, invoice-status reconciliation, retained void audit records, and private one-page Letter/A4 receipt PDFs.
+- Added deterministic Gmail category subjects/headers and an idempotent exact-account label/filter provisioner that archives only managed category mail.
+- Added focused notification, Gmail-filter, and PDF regression tests plus ten visual receipt fixtures.
+
 ## 2026-08-19
 - Persisted payment stage, percentage, project value, due preset, configured payment methods, professional terms, closing copy, footer text, and page numbering without breaking legacy invoice `kind` values.
 - Expanded production runtime verification to generate and relay-upload a PDF invoice, reload the exact custom 25% calculation, and confirm assigned-client visibility before complete cleanup.

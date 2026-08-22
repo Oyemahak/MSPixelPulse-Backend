@@ -12,6 +12,7 @@ import {
 } from "../../../lib/projectAccess.js";
 import { googleFilesRepository } from '../../../repositories/files.repository.js';
 import { storageProviderName } from '../../../config/providers.js';
+import { emitPortalEvent } from '../../../lib/portalEvents.js';
 
 /**
  * Multer keeps legacy multipart files in memory before passing them to the configured storage provider.
@@ -188,9 +189,8 @@ export async function upsertRequirement(req, res) {
   }
 
   // Load current doc or create new
-  const current =
-    (await Requirement.findOne({ project: projectId })) ||
-    new Requirement({ project: projectId });
+  const existing = await Requirement.findOne({ project: projectId });
+  const current = existing || new Requirement({ project: projectId });
 
   const next = current.toObject();
   const replacedPaths = [];
@@ -320,6 +320,29 @@ export async function upsertRequirement(req, res) {
     }
   }
 
+  const projectForEvent = await Project.findById(projectId).lean();
+  const uploadedCount = [
+    direct.logo, direct.brief, ...(direct.supporting || []),
+    ...Object.values(direct.pageFiles || {}).flat(),
+    ...Object.values(filesByField || {}).flat(),
+  ].filter(Boolean).length;
+  await emitPortalEvent({
+    type: existing ? 'requirement_updated' : 'requirement_submitted',
+    category: 'requirements',
+    title: `${existing ? 'Requirements updated' : 'Requirements submitted'} - ${projectForEvent?.title || 'Project'}`,
+    message: uploadedCount
+      ? `${uploadedCount} file${uploadedCount === 1 ? '' : 's'} and the latest requirement notes were saved.`
+      : 'The latest requirement notes were saved.',
+    actor: me, project: projectForEvent, relatedEntityType: 'Requirement', relatedEntityId: String(saved._id),
+    actionUrl: `/admin/projects/${projectId}/requirements`,
+    actionUrlByRole: { client: `/client/projects/${projectId}`, developer: `/dev/projects/${projectId}/requirements` },
+    targets: me?.role === 'client'
+      ? { admins: true, developer: true }
+      : { admins: true, client: true, developer: true },
+    dedupeKey: `requirement:${String(saved._id)}:${String(saved.updatedAt || Date.now())}`,
+    metadata: { fileCount: uploadedCount },
+  });
+
   res.json({ ok: true, requirement: await presentRequirement(saved.toObject()), cleanupPending });
 }
 
@@ -338,6 +361,16 @@ export async function setReview(req, res) {
     { $set: { reviewedByDev: !!reviewed, reviewedAt: reviewed ? new Date() : null } },
     { new: true, upsert: true }
   ).lean();
+  await emitPortalEvent({
+    type: 'requirement_status_changed', category: 'requirements',
+    title: `Requirements ${reviewed ? 'reviewed' : 'reopened'} - ${project.title || 'Project'}`,
+    message: reviewed ? 'The project requirements were marked as reviewed.' : 'The project requirements were reopened for review.',
+    actor: req.user, project, relatedEntityType: 'Requirement', relatedEntityId: String(doc?._id || ''),
+    actionUrl: `/admin/projects/${projectId}/requirements`,
+    actionUrlByRole: { client: `/client/projects/${projectId}`, developer: `/dev/projects/${projectId}/requirements` },
+    targets: { admins: true, client: true, developer: true },
+    dedupeKey: `requirement-review:${String(doc?._id || projectId)}:${reviewed}:${String(doc?.updatedAt || Date.now())}`,
+  });
   res.json({ ok: true, requirement: await presentRequirement(doc) });
 }
 

@@ -36,6 +36,15 @@ A disposable production role-CRUD E2E run completed with 35 checks passed, 0 fai
 
 The real protected production Admin account must never be used as a mutation test subject. It may only bootstrap disposable Admin test accounts and remove them afterward.
 
+## Portal Notifications And Payment Receipts — 2026-08-22
+
+- `PortalNotifications` and `Receipts` are production Google Sheets tabs behind repository adapters; do not bypass them with local-only state or a new database provider.
+- Invoice payment state changes only through the dedicated idempotent payment endpoint. Generic invoice update/delete logic must not create, edit, or erase accepted payment history.
+- Every accepted payment creates stable `MSP-PAY-*` and `MSP-RCT-*` identifiers, an immutable receipt snapshot, and a private generated PDF stored through the existing Google Drive boundary.
+- Admin may void a receipt with a required audit reason. Void retains the identifier, original snapshot, record, and private document; receipts are never deleted or renumbered.
+- Role-aware in-app notifications are the authoritative record. Operational email is supplementary, uses deterministic `[MSP:CATEGORY]` subjects, and defaults to `mspixelpulse@gmail.com` unless configured.
+- Notification and operational-email failures must not roll back an otherwise successful business mutation.
+
 ## Authentication Rules
 
 - JWT auth and account authorization are centralized in `src/middleware/auth.js`.

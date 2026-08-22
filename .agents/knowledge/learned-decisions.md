@@ -13,6 +13,14 @@ Use the Knowledge Update Protocol before editing this file.
 
 ## Entries
 
+- Date: 2026-08-22
+- Source: User production-upgrade specification, provider architecture, and receipt render QA
+- Decision or note: Use central event fan-out for persistent role-aware notifications and supplementary operational email. Route accepted payments only through an idempotent endpoint that issues retained payment/receipt records and immutable financial snapshots.
+- Evidence: `portalEvents.js`, provider repositories, dedicated payment/receipt controller, 118 backend tests, and ten visually rendered Letter/A4 receipt fixtures.
+- Affected areas: Google Sheets schema, project/requirement/message/lead/support/auth events, invoice totals/status, private Drive receipts, operational email
+- Confidence: High
+- Reviewer: Production API, role, Gmail, and storage verification required after deployment
+
 - Date: 2026-08-19
 - Source: User production invoice workflow specification and existing Google Sheets/Drive invoice architecture
 - Decision or note: Persist explicit payment-stage, project-value, due-preset, payment-method, terms, closing, footer, and page-number fields while retaining legacy `kind` compatibility and the existing encrypted Drive relay.

@@ -63,9 +63,11 @@ const {
   leadsRepository,
   messagesRepository,
   notificationsRepository,
+  portalNotificationsRepository,
   projectMembersRepository,
   projectsRepository,
   requirementsRepository,
+  receiptsRepository,
   roomsRepository,
   siteContentRepository,
   tasksRepository,
@@ -130,10 +132,20 @@ try {
   await roundTrip(roomsRepository, { id: ids.room, projectId: ids.project }, created);
   await roundTrip(messagesRepository, { id: `${runId}-message`, projectId: ids.project, roomId: ids.room, userId: ids.user, kind: 'room', text: 'Phase 1 test' }, created);
   await roundTrip(invoicesRepository, { id: `${runId}-invoice`, projectId: ids.project, clientId: ids.user, status: 'draft', currency: 'CAD' }, created);
+  await roundTrip(receiptsRepository, {
+    id: `${runId}-receipt`, receiptNumber: `${runId}-receipt-number`, invoice: `${runId}-invoice`, invoiceNumber: `${runId}-invoice-number`,
+    project: ids.project, client: ids.user, paymentId: `${runId}-payment`, idempotencyKey: `${runId}-idempotency`,
+    paymentDate: new Date().toISOString(), receiptDate: new Date().toISOString(), amount: 1, currency: 'CAD',
+    issuedAt: new Date().toISOString(), createdBy: ids.user,
+  }, created);
   await roundTrip(filesRepository, { id: `${runId}-file`, projectId: ids.project, userId: ids.user, driveFileId: `${runId}-placeholder`, logicalPath: `projects/${ids.project}/uploads/metadata.txt`, originalName: 'metadata.txt', storedName: 'metadata.txt', mimeType: 'text/plain', size: '1', category: 'uploads' }, created);
   await roundTrip(leadsRepository, { id: `${runId}-lead`, name: 'Phase 1 Lead', email: `${runId}-lead@example.test`, message: 'Test', status: 'new' }, created);
   await roundTrip(tasksRepository, { id: `${runId}-task`, projectId: ids.project, userId: ids.user, title: 'Phase 1 test task', status: 'todo' }, created);
   await roundTrip(notificationsRepository, { id: `${runId}-notification`, notificationType: 'phase1_test', relatedEntityType: 'Project', relatedEntityId: ids.project, status: 'skipped' }, created);
+  await roundTrip(portalNotificationsRepository, {
+    id: `${runId}-portal-notification`, recipient: ids.user, recipientRole: 'client', type: 'phase1_test', category: 'system',
+    title: 'Phase 1 test', message: 'Provider round trip', actionUrl: '/client/notifications', dedupeKey: `${runId}-portal-notification`,
+  }, created);
   await roundTrip(blogCommentsRepository, { id: `${runId}-comment`, blogSlug: 'phase-1-test', blogTitle: 'Phase 1 Test', blogUrl: 'https://example.test', name: 'Test', email: `${runId}-comment@example.test`, comment: 'Test comment', status: 'pending' }, created);
   await roundTrip(blogReactionsRepository, { id: `${runId}-reaction`, blogSlug: 'phase-1-test', blogTitle: 'Phase 1 Test', blogUrl: 'https://example.test', reactionType: 'like', identityHash: `${runId}-hash` }, created);
   await roundTrip(blogSharesRepository, { id: `${runId}-share`, blogSlug: 'phase-1-test', blogTitle: 'Phase 1 Test', blogUrl: 'https://example.test', platform: 'copy_link', eventType: 'share_option_selected', identityHash: `${runId}-share-hash` }, created);

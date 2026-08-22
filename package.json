@@ -22,7 +22,10 @@
     "normalize:portal:dry": "node --env-file=.env src/scripts/normalizePortalAccounts.js",
     "normalize:portal": "node --env-file=.env src/scripts/normalizePortalAccounts.js --confirm",
     "test:google-provider": "node --env-file=.env src/scripts/googleProviderSmokeTest.js",
-    "verify:google-runtime": "DATA_PROVIDER=google STORAGE_PROVIDER=google-drive node --env-file=.env src/scripts/verifyGoogleRuntime.js --confirm-production"
+    "verify:google-runtime": "DATA_PROVIDER=google STORAGE_PROVIDER=google-drive node --env-file=.env src/scripts/verifyGoogleRuntime.js --confirm-production",
+    "gmail:setup-notification-labels": "node --env-file=.env src/scripts/setupGmailNotificationLabels.js",
+    "verify:receipt-pdfs": "node src/scripts/generateReceiptQaSamples.js",
+    "migrate:google-tabs": "DATA_PROVIDER=google node --env-file=.env src/scripts/ensureProductionGoogleTabs.js --confirm-production"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -37,6 +40,7 @@
     "mongoose": "^8.6.1",
     "morgan": "^1.10.0",
     "multer": "^1.4.5-lts.2",
+    "pdf-lib": "^1.17.1",
     "socket.io": "^4.8.1"
   },
   "devDependencies": {

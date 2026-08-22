@@ -40,7 +40,7 @@ export function mailerStatus() {
   };
 }
 
-async function sendWithResend({ to, subject, html, text, replyTo }) {
+async function sendWithResend({ to, subject, html, text, replyTo, headers }) {
   const apiKey = String(process.env.RESEND_API_KEY || "").trim();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), EMAIL_TIMEOUT_MS);
@@ -59,6 +59,7 @@ async function sendWithResend({ to, subject, html, text, replyTo }) {
         html,
         text,
         ...(replyTo ? { reply_to: replyTo } : {}),
+        ...(headers && Object.keys(headers).length ? { headers } : {}),
       }),
       signal: controller.signal,
     });
@@ -83,13 +84,13 @@ async function sendWithResend({ to, subject, html, text, replyTo }) {
   }
 }
 
-export async function sendMail({ to, subject, html, text, replyTo }) {
+export async function sendMail({ to, subject, html, text, replyTo, headers }) {
   if (!String(process.env.RESEND_API_KEY || "").trim()) {
     const error = new Error("Email delivery is not configured");
     error.code = "RESEND_NOT_CONFIGURED";
     throw error;
   }
-  return sendWithResend({ to, subject, html, text, replyTo });
+  return sendWithResend({ to, subject, html, text, replyTo, headers });
 }
 
 function renderRows(rows) {

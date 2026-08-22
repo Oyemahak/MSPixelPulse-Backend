@@ -27,6 +27,9 @@ The production spreadsheet is the durable structured-data store. Core tabs inclu
 - Rooms
 - Threads
 - Invoices
+- Receipts
+- PortalNotifications
+- Sequences
 - Files
 - Leads
 - Tasks
@@ -206,6 +209,15 @@ For file operations additionally verify:
 - replacement does not leave the previous object as an unintended active file
 
 For invoice workflows additionally verify calculated line totals, discounts, optional tax, payments/balances, automatic status transitions, unique numbering, private settings, client-safe serialization, and secure file replacement cleanup.
+
+## Notification And Receipt Boundaries
+
+- `portalEvents.js` is the single event fan-out point for role-aware in-app records and supplementary operational email.
+- Recipient resolution must use authoritative user/project membership, exclude the actor, and emit role-safe action URLs.
+- Payment creation requires an idempotency key. Stable payment and receipt identifiers, financial snapshots, storage metadata, and issued timestamps are immutable.
+- Receipt PDFs are generated server-side and stored privately in Drive under the invoice hierarchy. Browser clients receive only backend-authorized read/download URLs.
+- Void is a retained status and audit reason, not deletion. Invoice deletion is denied once receipts exist.
+- Gmail organization is provisioned outside request handling by the idempotent `gmail:setup-notification-labels` command; it must validate the exact mailbox and preserve unrelated mail.
 
 ## Deployment Rules
 
