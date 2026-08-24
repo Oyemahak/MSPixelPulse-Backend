@@ -15,6 +15,9 @@ const DEFAULT_PROJECT_SLUG =
 const DEMO_INVOICE_NUMBER =
   'MSP-DEMO-0001';
 
+const CONFIRMATION_FLAG =
+  '--confirm-production';
+
 function normalizeEmail(value) {
   return String(value || '')
     .trim()
@@ -25,6 +28,12 @@ async function run() {
   if (dataProviderName() !== 'google') {
     throw new Error(
       'seed:demo-invoice now requires DATA_PROVIDER=google',
+    );
+  }
+
+  if (!process.argv.includes(CONFIRMATION_FLAG)) {
+    throw new Error(
+      `Refusing to create or update persistent demo billing data without ${CONFIRMATION_FLAG}`,
     );
   }
 

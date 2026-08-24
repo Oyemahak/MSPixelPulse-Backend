@@ -1,6 +1,7 @@
 // backend/src/models/Invoice.js
 import mongoose from "mongoose";
 import { createProviderModel } from '../providers/providerModel.js';
+import { validateInvoiceStatusTotal } from '../lib/invoiceValidation.js';
 
 const FileRef = new mongoose.Schema(
   { name: String, type: String, size: Number, url: String, path: String },
@@ -123,6 +124,15 @@ const InvoiceSchema = new mongoose.Schema(
 
 InvoiceSchema.index({ project: 1, kind: 1, createdAt: -1 });
 
+InvoiceSchema.pre('validate', function validateInvoiceTotal(next) {
+  try {
+    validateInvoiceStatusTotal(this);
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
 const Invoice = mongoose.model("Invoice", InvoiceSchema);
 export default createProviderModel(Invoice, {
   modelName: 'Invoice', tab: 'Invoices', relations: { project: 'Project', client: 'User', uploadedBy: 'User' },
@@ -133,4 +143,5 @@ export default createProviderModel(Invoice, {
     total: 0, amountPaid: 0, balanceDue: 0, payments: [], paymentMethods: [],
     showPageNumbers: true, pageSize: 'LETTER', isDemo: false,
   },
+  validate: validateInvoiceStatusTotal,
 });

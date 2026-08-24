@@ -131,6 +131,34 @@ test('invoice status follows payments without overriding explicit cancellation',
   );
 });
 
+test('non-draft billing statuses require a positive invoice total', () => {
+  for (const status of ['sent', 'uploaded', 'partially_paid', 'paid', 'overdue']) {
+    assert.throws(
+      () => invoiceUploadInternals.requirePositiveTotalForStatus(status, 0),
+      (error) => {
+        assert.equal(error.status, 400);
+        assert.equal(error.code, 'INVOICE_TOTAL_REQUIRED');
+        assert.match(error.message, /greater than zero/i);
+        return true;
+      },
+    );
+  }
+
+  for (const status of ['draft', 'cancelled', 'archived']) {
+    assert.doesNotThrow(
+      () => invoiceUploadInternals.requirePositiveTotalForStatus(status, 0),
+    );
+  }
+
+  assert.doesNotThrow(
+    () => invoiceUploadInternals.requirePositiveTotalForStatus('sent', 0.01),
+  );
+  assert.throws(
+    () => invoiceUploadInternals.requirePositiveTotalForStatus('sent', Number.POSITIVE_INFINITY),
+    { code: 'INVOICE_TOTAL_REQUIRED' },
+  );
+});
+
 test('invoice settings keep tax optional and do not copy sample tax claims', () => {
   const settings = invoiceUploadInternals.normalizeInvoiceSettings({
     sender: { businessName: 'MSPixelPulse' },

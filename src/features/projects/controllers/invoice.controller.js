@@ -13,6 +13,7 @@ import {
   validateUpload,
 } from "../../../lib/filePolicy.js";
 import { cleanText } from "../../../lib/validation.js";
+import { requirePositiveInvoiceTotal } from "../../../lib/invoiceValidation.js";
 import {
   canReadProject,
   projectAccessError,
@@ -717,6 +718,22 @@ export async function startInvoiceUpload(req, res, next) {
       invoice.invoiceNumber || existing?.invoiceNumber,
       invoiceId,
     );
+    const projectedPayload = buildInvoicePayload(
+      { ...invoice, kind },
+      project,
+      req.user,
+      existing || {},
+    );
+    const projectedStatus = automaticStatus({
+      requested: invoice.status,
+      fallback: existing
+        ? existing.status === 'draft' ? 'uploaded' : existing.status
+        : 'uploaded',
+      total: projectedPayload.total,
+      amountPaid: projectedPayload.amountPaid,
+      dueDate: projectedPayload.dueDate || existing?.dueDate,
+    });
+    requirePositiveInvoiceTotal(projectedStatus, projectedPayload.total);
 
     const logicalPath = relayUploadPath(projectId, originalName);
     const userId = String(req.user._id);
@@ -868,6 +885,7 @@ export async function relayInvoiceUploadChunk(req, res, next) {
         amountPaid: patch.amountPaid,
         dueDate: patch.dueDate || invoice.dueDate,
       });
+      requirePositiveInvoiceTotal(patch.status, patch.total);
       patch.paidAt = patch.status === 'paid' ? invoice.paidAt || new Date() : null;
       patch.sentAt = patch.status === 'sent' ? invoice.sentAt || new Date() : invoice.sentAt;
 
@@ -902,6 +920,7 @@ export async function relayInvoiceUploadChunk(req, res, next) {
         amountPaid: payload.amountPaid,
         dueDate: payload.dueDate,
       });
+      requirePositiveInvoiceTotal(status, payload.total);
 
       invoice = await Invoice.create({
         project: projectId,
@@ -978,6 +997,7 @@ export async function createInvoice(req, res, next) {
       amountPaid: payload.amountPaid,
       dueDate: payload.dueDate,
     });
+    requirePositiveInvoiceTotal(status, payload.total);
 
     const doc = await Invoice.create({
       project: projectId,
@@ -1025,6 +1045,7 @@ export async function updateInvoice(req, res, next) {
       amountPaid: patch.amountPaid,
       dueDate: patch.dueDate || doc.dueDate,
     });
+    requirePositiveInvoiceTotal(patch.status, patch.total);
     patch.paidAt = patch.status === "paid" ? doc.paidAt || new Date() : null;
     patch.sentAt = patch.status === "sent" ? doc.sentAt || new Date() : doc.sentAt;
 
@@ -1081,6 +1102,7 @@ export const invoiceUploadInternals = {
   normalizePaymentStage,
   normalizePaymentTermsPreset,
   normalizeInvoiceSettings,
+  requirePositiveTotalForStatus: requirePositiveInvoiceTotal,
   withoutPaymentMutations,
   uploadRange,
 };

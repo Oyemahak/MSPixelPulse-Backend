@@ -264,12 +264,13 @@ function aggregateExpression(expression, record) {
 }
 
 class GoogleModelAdapter {
-  constructor({ modelName, tab, relations = {}, unique = [], defaults = {} }) {
+  constructor({ modelName, tab, relations = {}, unique = [], defaults = {}, validate = null }) {
     this.modelName = modelName;
     this.tab = tab;
     this.relations = relations;
     this.unique = unique;
     this.defaults = defaults;
+    this.validateRecord = validate;
     this.repository = new GoogleSheetsRepository(tab);
     adapters.set(modelName, this);
   }
@@ -327,6 +328,7 @@ class GoogleModelAdapter {
       }
       record.slug = slug;
     }
+    if (this.validateRecord) await this.validateRecord(record, current);
     return record;
   }
 
