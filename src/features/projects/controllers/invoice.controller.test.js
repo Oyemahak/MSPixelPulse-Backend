@@ -132,7 +132,7 @@ test('invoice status follows payments without overriding explicit cancellation',
 });
 
 test('non-draft billing statuses require a positive invoice total', () => {
-  for (const status of ['sent', 'uploaded', 'partially_paid', 'paid', 'overdue']) {
+  for (const status of ['sent', 'uploaded', 'partially_paid', 'paid', 'overdue', 'cancelled', 'archived']) {
     assert.throws(
       () => invoiceUploadInternals.requirePositiveTotalForStatus(status, 0),
       (error) => {
@@ -144,11 +144,9 @@ test('non-draft billing statuses require a positive invoice total', () => {
     );
   }
 
-  for (const status of ['draft', 'cancelled', 'archived']) {
-    assert.doesNotThrow(
-      () => invoiceUploadInternals.requirePositiveTotalForStatus(status, 0),
-    );
-  }
+  assert.doesNotThrow(
+    () => invoiceUploadInternals.requirePositiveTotalForStatus('draft', 0),
+  );
 
   assert.doesNotThrow(
     () => invoiceUploadInternals.requirePositiveTotalForStatus('sent', 0.01),

@@ -4,6 +4,8 @@ const POSITIVE_TOTAL_STATUSES = new Set([
   'partially_paid',
   'paid',
   'overdue',
+  'cancelled',
+  'archived',
 ]);
 
 export function requirePositiveInvoiceTotal(status, total) {
@@ -16,7 +18,7 @@ export function requirePositiveInvoiceTotal(status, total) {
   }
 
   const error = new Error(
-    'Invoice total must be greater than zero before it can be sent, uploaded, partially paid, paid, or overdue. Save it as a draft until the total is set.',
+    'Invoice total must be greater than zero before it can leave draft status. Only an explicit draft may have a zero total.',
   );
   error.status = 400;
   error.code = 'INVOICE_TOTAL_REQUIRED';
