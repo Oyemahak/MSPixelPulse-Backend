@@ -112,6 +112,15 @@ ENABLE_DEBUG_ROUTES=false
 DEBUG_ROUTE_KEY=
 ```
 
+Optional private console intake (off by default):
+
+```text
+CONSOLE_INTAKE_URL=
+CONSOLE_INTAKE_SECRET=
+```
+
+When both are set, every genuine new contact lead (not honeypot, duplicate or invalid submissions) is also sent to the private MSPixelPulse console as a signed `POST` (`X-MSP-Timestamp` and `X-MSP-Signature: v1=<hex HMAC-SHA256(secret, timestamp + "." + body)>`). The feature stays off, and nothing is sent, until both variables are set, the URL uses `https` and the secret is at least 32 characters. The console must hold the same value as `INTAKE_WEBHOOK_SECRET`. Only the contact fields are forwarded (lead id, name, email, phone, business name, service, inquiry type, message, source page URL, created time); the IP address and user agent are never sent. The call is bounded by a 4 second timeout, is not retried, never changes the visitor's response and logs only a short failure code. Implementation: `src/lib/consoleIntake.js`.
+
 ## Google persistence
 
 Production must use `DATA_PROVIDER=google` and `STORAGE_PROVIDER=google-drive`.

@@ -3,6 +3,7 @@ import { cleanPublicUrl, cleanText, isValidEmail, normalizeEmail } from "../../.
 import { deliverNotification } from "../../../lib/notificationService.js";
 import { contactConfirmationEmail, contactNotificationEmail } from "../../../lib/emailTemplates.js";
 import { emitPortalEvent, portalEventInternals } from "../../../lib/portalEvents.js";
+import { startConsoleIntake } from "../../../lib/consoleIntake.js";
 
 const maxLengths = {
   inquiryType: 80,
@@ -17,7 +18,19 @@ const maxLengths = {
   sourceSlug: 200,
 };
 
+export const leadControllerInternals = {
+  findRecentDuplicate: (payload) => Lead.findOne({
+    email: payload.email,
+    message: payload.message,
+    source: payload.source,
+    createdAt: { $gte: new Date(Date.now() - 5 * 60 * 1000) },
+  }),
+  saveLead: (record) => Lead.create(record),
+  startConsoleIntake,
+};
+
 export async function createLead(req, res) {
+  let consoleIntake = null;
   try {
     if (cleanText(req.body?._hp, 200)) return res.status(201).json({ ok: true });
     const payload = {
@@ -37,12 +50,7 @@ export async function createLead(req, res) {
       return res.status(400).json({ error: "Name, a valid email, and a message are required." });
     }
 
-    const duplicate = await Lead.findOne({
-      email: payload.email,
-      message: payload.message,
-      source: payload.source,
-      createdAt: { $gte: new Date(Date.now() - 5 * 60 * 1000) },
-    });
+    const duplicate = await leadControllerInternals.findRecentDuplicate(payload);
     if (duplicate) {
       return res.status(200).json({
         ok: true,
@@ -52,11 +60,13 @@ export async function createLead(req, res) {
       });
     }
 
-    const lead = await Lead.create({
+    const lead = await leadControllerInternals.saveLead({
       ...payload,
       ip: req.ip,
       ua: cleanText(req.get("user-agent"), 500),
     });
+    // Only a genuine new lead reaches this point. The copy is bounded, never throws and never changes the response.
+    consoleIntake = leadControllerInternals.startConsoleIntake(lead);
     const internalRecipients = [portalEventInternals.operationalRecipient()];
     const notificationPromise = deliverNotification({
       type: "contact_notification",
@@ -93,6 +103,7 @@ export async function createLead(req, res) {
       operationalEmail: false, metadata: { reference: String(lead._id) },
     });
 
+    await consoleIntake;
     return res.status(201).json({
       ok: true,
       leadId: lead._id,
@@ -101,6 +112,7 @@ export async function createLead(req, res) {
     });
   } catch (error) {
     console.error("[lead] createLead error:", error?.code || error?.name || "FAILED");
+    await consoleIntake;
     return res.status(500).json({ error: "Failed to save the message. Please try again later." });
   }
 }
