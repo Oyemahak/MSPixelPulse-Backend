@@ -13,9 +13,8 @@ if (inspect) {
   Project = (await import('../models/Project.js')).default;
   // Exact target identities only. No unrelated portal projects are fetched or changed.
   existing = await Project.find({ $or: [
-    { slug: 'savora-kitchen-table' }, { slug: 'savora-restaurant-operations' },
+    { slug: 'savora-kitchen-table' },
     { repositoryFullName: 'mspixelpulseagency/mspixelpulse-demo-restaurant' },
-    { repositoryFullName: 'mspixelpulseagency/mspixelpulse-restaurant-orders' },
   ] });
   existing = existing.map((p) => p.toObject ? p.toObject() : p);
 }
@@ -34,4 +33,4 @@ if (apply) {
     else await Project.create(row.patch);
   }
 }
-console.log(JSON.stringify({ applied: apply, entries: plan.map(({ slug, action, id }) => ({ slug, action, id })), publicPublication: false, note: 'Production publication and Aurelia hostname update require live verification and separate targeted approval.' }, null, 2));
+console.log(JSON.stringify({ applied: apply, entries: plan.map(({ slug, action, id, reviewFields = [] }) => ({ slug, action, id, reviewFields })), publicPublication: false, note: 'Only the canonical SAVORA draft is prepared. Existing nonempty metadata, published records and the operations record remain untouched. Review changed fields and publication through the authenticated admin project editor.' }, null, 2));

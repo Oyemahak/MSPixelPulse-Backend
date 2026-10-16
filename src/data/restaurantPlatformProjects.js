@@ -2,10 +2,10 @@
 export const restaurantPlatformProjects = [
   {
     "slug": "savora-kitchen-table",
-    "title": "SAVORA — Kitchen & Table",
-    "summary": "A premium restaurant storefront with a persistent safe-demo ordering workflow.",
-    "shortDescription": "An original Canadian restaurant concept with an orderable menu, customization, guest checkout and order tracking.",
-    "fullDescription": "A connected restaurant platform implemented as two applications sharing one authoritative ordering API and database. This catalog draft stays unpublished until the production domain and ordering workflows pass verification.",
+    "title": "SAVORA — Restaurant Platform",
+    "summary": "Premium restaurant ordering connected to kitchen management.",
+    "shortDescription": "A complete restaurant experience combining a premium customer-facing website, interactive food ordering, demo checkout, live order tracking and connected kitchen management.",
+    "fullDescription": "One fictional restaurant platform with a cinematic storefront, 73 dishes, food customization, shopping bag, demo checkout and persistent order tracking. Its connected operations application supports kitchen order management, status updates and owner-protected administration at https://orders.restaurant.mspixelpulse.com. No real payments, food preparation or delivery take place. Owner-only integrations are not represented as verified.",
     "projectClassification": "demo",
     "industry": "Restaurant / Hospitality",
     "websiteType": "Restaurant Ordering Platform",
@@ -20,68 +20,35 @@ export const restaurantPlatformProjects = [
     "liveUrl": "https://restaurant.mspixelpulse.com",
     "repositoryUrl": "https://github.com/MSPixelPulseAgency/mspixelpulse-demo-restaurant",
     "repositoryFullName": "mspixelpulseagency/mspixelpulse-demo-restaurant",
-    "thumbnail": "https://mspixelpulse.com/projects/savora-preview.svg",
-    "imageAltText": "SAVORA original wordmark; application screenshot pending release verification",
+    "thumbnail": "https://mspixelpulse.com/projects/mockups/savora-restaurant-platform.webp",
+    "imageAltText": "Current SAVORA chef-hat storefront and connected demo operations shown in desktop and mobile frames",
+    "categories": ["Restaurant", "Hospitality", "Food Ordering"],
+    "galleryImages": [
+      { "url": "https://mspixelpulse.com/projects/screenshots/savora-storefront-1440.webp", "alt": "SAVORA desktop storefront with chef-hat branding" },
+      { "url": "https://mspixelpulse.com/projects/screenshots/savora-storefront-390.webp", "alt": "SAVORA mobile restaurant storefront" },
+      { "url": "https://mspixelpulse.com/projects/screenshots/savora-operations-1440.webp", "alt": "SAVORA desktop isolated Demo operator workspace" },
+      { "url": "https://mspixelpulse.com/projects/screenshots/savora-operations-390.webp", "alt": "SAVORA mobile isolated Demo operator workspace" }
+    ],
     "published": false,
     "featured": false,
     "displayOrder": 120,
     "keyFeatures": [
-      "Searchable customizable food menu",
+      "Searchable customizable 73-item food menu",
       "Optional-account and guest checkout",
       "Server-priced persisted orders",
-      "Order tracking and reorder"
+      "Order tracking and reorder",
+      "Connected kitchen order management",
+      "Owner-protected operations dashboard"
     ],
     "servicesProvided": [
       "UX/UI design",
       "Full-stack development",
       "Responsive design"
     ],
-    "projectOverview": "A connected restaurant platform implemented as two applications sharing one authoritative ordering API and database. This catalog draft stays unpublished until the production domain and ordering workflows pass verification.",
-    "resultSummary": "Implementation prepared. Production verification and publication are pending. No real payments or fulfillment.",
+    "projectOverview": "A premium restaurant website with connected ordering and kitchen management, presented as one platform across two applications.",
+    "resultSummary": "Live fictional demo. Publication of this persistent catalog draft remains an explicit admin action. No real payments or fulfillment.",
     "status": "draft",
-    "seoTitle": "SAVORA — Kitchen & Table | MSPixelPulse",
-    "seoDescription": "A premium restaurant storefront with a persistent safe-demo ordering workflow."
-  },
-  {
-    "slug": "savora-restaurant-operations",
-    "title": "SAVORA — Restaurant Operations",
-    "summary": "Connected secure administration and kitchen display demo.",
-    "shortDescription": "Owner-authenticated order management, kitchen tickets, menu administration and operational reporting.",
-    "fullDescription": "A connected restaurant platform implemented as two applications sharing one authoritative ordering API and database. This catalog draft stays unpublished until the production domain and ordering workflows pass verification.",
-    "projectClassification": "demo",
-    "industry": "Restaurant / Hospitality",
-    "websiteType": "Operations Dashboard",
-    "platform": "Next.js",
-    "technologies": [
-      "Next.js",
-      "React",
-      "TypeScript",
-      "PostgreSQL",
-      "Better Auth"
-    ],
-    "liveUrl": "https://orders.restaurant.mspixelpulse.com",
-    "repositoryUrl": "https://github.com/MSPixelPulseAgency/mspixelpulse-restaurant-orders",
-    "repositoryFullName": "mspixelpulseagency/mspixelpulse-restaurant-orders",
-    "thumbnail": "https://mspixelpulse.com/projects/savora-preview.svg",
-    "imageAltText": "SAVORA original wordmark; application screenshot pending release verification",
-    "published": false,
-    "featured": false,
-    "displayOrder": 121,
-    "keyFeatures": [
-      "Owner-authenticated order operations",
-      "Kitchen ticket workflow",
-      "Shared persistent order dataset",
-      "Demo-only payment and fulfillment"
-    ],
-    "servicesProvided": [
-      "UX/UI design",
-      "Full-stack development",
-      "Responsive design"
-    ],
-    "projectOverview": "A connected restaurant platform implemented as two applications sharing one authoritative ordering API and database. This catalog draft stays unpublished until the production domain and ordering workflows pass verification.",
-    "resultSummary": "Implementation prepared. Production verification and publication are pending. No real payments or fulfillment.",
-    "status": "draft",
-    "seoTitle": "SAVORA — Restaurant Operations | MSPixelPulse",
-    "seoDescription": "Connected secure administration and kitchen display demo."
+    "seoTitle": "SAVORA Restaurant Platform | MSPixelPulse",
+    "seoDescription": "A fictional restaurant platform combining food ordering, demo checkout, live order tracking and connected kitchen management."
   }
 ];

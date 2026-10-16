@@ -11,6 +11,12 @@ import {
   projectScopeFor,
 } from '../../../lib/projectAccess.js';
 import { emitPortalEvent } from '../../../lib/portalEvents.js';
+import {
+  canonicalPublicProjectSlug,
+  consolidatePublicRestaurantProjects,
+  isStandaloneSavoraOperations,
+  presentPublicRestaurantProject,
+} from '../../../lib/publicRestaurantProjects.js';
 
 /* Populate user refs consistently */
 const POP = [
@@ -216,15 +222,20 @@ export async function listPublicProjects(req, res) {
     .sort({ featured: -1, displayOrder: 1, completionDate: -1, createdAt: -1 })
     .lean();
 
-  res.json({ projects: await Promise.all(projects.map(presentProject)) });
+  const publicProjects = await Promise.all(projects.map(presentProject));
+  res.json({ projects: consolidatePublicRestaurantProjects(publicProjects) });
 }
 
 /** GET /api/public/projects/:slug */
 export async function getPublicProject(req, res) {
   const { slug } = req.params;
-  const project = await Project.findOne({ slug, published: true }).select(PUBLIC_SELECT).lean();
+  let project = await Project.findOne({ slug, published: true }).select(PUBLIC_SELECT).lean();
+  const canonicalSlug = canonicalPublicProjectSlug(slug);
+  if (canonicalSlug !== slug && (!project || isStandaloneSavoraOperations(project))) {
+    project = await Project.findOne({ slug: canonicalSlug, published: true }).select(PUBLIC_SELECT).lean();
+  }
   if (!project) return res.status(404).json({ message: 'Project not found' });
-  res.json({ project: await presentProject(project) });
+  res.json({ project: presentPublicRestaurantProject(await presentProject(project)) });
 }
 
 /** GET /api/projects/:projectId */
