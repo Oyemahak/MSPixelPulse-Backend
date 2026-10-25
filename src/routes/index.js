@@ -31,7 +31,10 @@ import contentRoutes from "./content.js";
 import supportRoutes from "../features/support/routes/index.js";
 import notificationRoutes from "../features/notifications/routes/index.js";
 
+import { aurelContactHandler } from "../lib/aurelContact.js";
+
 const router = Router();
+router.post("/aurel-contact", aurelContactHandler());
 
 // Auth
 router.use("/auth", authFeatureRoutes);

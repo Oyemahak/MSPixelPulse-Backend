@@ -40,7 +40,7 @@ export function mailerStatus() {
   };
 }
 
-async function sendWithResend({ to, subject, html, text, replyTo, headers }) {
+async function sendWithResend({ to, subject, html, text, replyTo, headers, idempotencyKey }) {
   const apiKey = String(process.env.RESEND_API_KEY || "").trim();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), EMAIL_TIMEOUT_MS);
@@ -51,6 +51,7 @@ async function sendWithResend({ to, subject, html, text, replyTo, headers }) {
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
+        ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
       },
       body: JSON.stringify({
         from: senderAddress(),
@@ -84,13 +85,13 @@ async function sendWithResend({ to, subject, html, text, replyTo, headers }) {
   }
 }
 
-export async function sendMail({ to, subject, html, text, replyTo, headers }) {
+export async function sendMail({ to, subject, html, text, replyTo, headers, idempotencyKey }) {
   if (!String(process.env.RESEND_API_KEY || "").trim()) {
     const error = new Error("Email delivery is not configured");
     error.code = "RESEND_NOT_CONFIGURED";
     throw error;
   }
-  return sendWithResend({ to, subject, html, text, replyTo, headers });
+  return sendWithResend({ to, subject, html, text, replyTo, headers, idempotencyKey });
 }
 
 function renderRows(rows) {
