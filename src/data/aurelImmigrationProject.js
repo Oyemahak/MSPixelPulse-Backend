@@ -1,20 +1,20 @@
 export const aurelImmigrationProject = {
-  slug:'aurel-immigration-legal',title:'AUREL Immigration & Legal',
-  summary:'A premium Canadian immigration consultancy website concept with thoughtful service discovery and educational resources.',
-  shortDescription:'An editorial immigration website concept featuring student resources, Canadian pathways, instant search and a consultation preview.',
+  slug:'aurel-immigration-legal',title:'Northstead Immigration',
+  summary:'A fictional premium Canadian immigration website concept by MSPixelPulse with thoughtful service discovery and educational resources.',
+  shortDescription:'A premium Canadian immigration website featuring student resources, immigration pathways, smart search, and consultation experiences.',
   fullDescription:'A fictional MSPixelPulse portfolio concept with ten service families, official Canadian resources and a thoughtful responsive experience. It provides no immigration advice, legal services or representation.',
   projectClassification:'demo',industry:'Immigration / Professional Services',websiteType:'Immigration Consultancy Website',platform:'React + Vite',
   technologies:['React','TypeScript','Vite','React Router','Lucide'],
   repositoryUrl:'https://github.com/MSPixelPulseAgency/mspixelpulse-demo-immigration',repositoryFullName:'mspixelpulseagency/mspixelpulse-demo-immigration',
   liveUrl:'https://immigration.mspixelpulse.com',thumbnail:'https://immigration.mspixelpulse.com/project-preview.webp',
-  imageAltText:'Actual AUREL Immigration & Legal homepage with floating navigation and Toronto skyline',coverSource:'site-screenshot',
+  imageAltText:'Actual Northstead Immigration homepage with floating navigation and Toronto skyline',coverSource:'site-screenshot',
   categories:['Immigration','Professional Services'],featured:false,published:true,displayOrder:145,completionDate:'2026-10-25',status:'completed',
-  projectOverview:'A source-backed immigration consultancy website concept by MSPixelPulse, designed around service discovery, international students and considered next steps.',
+  projectOverview:'Northstead Immigration is a fictional MSPixelPulse portfolio concept for a Canadian immigration website. The name joins the True North with a homestead, a place to settle and build a life. It is designed around service discovery, international students and considered next steps, and offers no licensed immigration or legal representation.',
   challenge:'Present complex educational information clearly without misrepresenting a fictional practice as a licensed representative.',
   solution:'An original navy, ivory and gold identity with editorial photography, data-driven services, official sources and accessible interactive tools.',
-  keyFeatures:['26 prerendered pages','Ten immigration service families','Instant search and resource filters','International student hub','Educational pathway explorer','Consultation preview','Agency contact delivery','Licensed photography and video'],
+  keyFeatures:['27 prerendered pages','Ten immigration service families','Instant search and resource filters','International student hub','Educational pathway explorer','Consultation preview','Reviews & feedback page','Agency contact delivery','Licensed photography and video','Autoplay Toronto hero film'],
   responsiveHighlights:['Verified at nine viewport widths from 320px to 1920px','Keyboard-accessible mobile navigation and search','Reduced-motion support'],
   servicesProvided:['Website design','Frontend development','Responsive design','Content architecture','Technical SEO'],
-  resultSummary:'A fictional Canadian immigration website concept. Consultation is a preview; real contact inquiries reach MSPixelPulse, not an immigration practice.',
-  seoTitle:'Canadian Immigration Website Concept | AUREL | MSPixelPulse',seoDescription:'Explore the AUREL Canadian immigration website concept by MSPixelPulse, featuring student resources, official guides and an accessible consultation preview.'
+  resultSummary:'A fictional Canadian immigration website concept with no licensed immigration or legal representation. Consultation is a preview; real contact inquiries reach MSPixelPulse, not an immigration practice.',
+  seoTitle:'Canadian Immigration Website Concept | Northstead Immigration | MSPixelPulse',seoDescription:'Explore Northstead Immigration, a fictional Canadian immigration website concept by MSPixelPulse with student resources, official guides and an accessible consultation preview.'
 };
